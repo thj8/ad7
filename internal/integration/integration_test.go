@@ -24,6 +24,7 @@ import (
 	"ad7/plugins/analytics"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
+	"ad7/plugins/hints"
 )
 
 const (
@@ -85,7 +86,7 @@ func TestMain(m *testing.M) {
 		})
 	})
 
-	plugins := []plugin.Plugin{leaderboard.New(), notification.New(), analytics.New()}
+	plugins := []plugin.Plugin{leaderboard.New(), notification.New(), analytics.New(), hints.New()}
 	for _, p := range plugins {
 		p.Register(r, st.DB(), auth)
 	}
@@ -131,6 +132,7 @@ func doRequest(t *testing.T, method, path, body, token string) *http.Response {
 
 func cleanup(t *testing.T) {
 	t.Helper()
+	testDB.Exec("DELETE FROM hints")
 	testDB.Exec("DELETE FROM competition_challenges")
 	testDB.Exec("DELETE FROM notifications")
 	testDB.Exec("DELETE FROM submissions")
@@ -764,4 +766,72 @@ func TestAnalyticsCategories(t *testing.T) {
 	if catMap["crypto"] != json.Number("1") {
 		t.Errorf("expected crypto category with 1 challenge, got %v", catMap["crypto"])
 	}
+}
+
+func TestHints(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create challenge
+	resp := doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Test Chal","description":"desc","score":100,"flag":"flag{test}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	// Create hint 1
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/challenges/%d/hints", chalID),
+		`{"content":"First hint"}`, adminTok)
+	assertStatus(t, resp, 201)
+
+	// Create hint 2
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/challenges/%d/hints", chalID),
+		`{"content":"Second hint"}`, adminTok)
+	assertStatus(t, resp, 201)
+
+	// User lists hints - should see 2 visible hints
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%d/hints", chalID), "", userTok)
+	assertStatus(t, resp, 200)
+	body := decodeJSON(t, resp)
+	hints := body["hints"].([]any)
+	if len(hints) != 2 {
+		t.Fatalf("expected 2 hints, got %d", len(hints))
+	}
+	hint1ID := int64(hints[0].(map[string]any)["id"].(json.Number))
+	hint2ID := int64(hints[1].(map[string]any)["id"].(json.Number))
+
+	// Update hint 2 to be invisible
+	visible := false
+	updateContent := "Updated second hint"
+	updateBody, _ := json.Marshal(map[string]any{"content": updateContent, "is_visible": visible})
+	resp = doRequest(t, "PUT", fmt.Sprintf("/api/v1/admin/hints/%d", hint2ID), string(updateBody), adminTok)
+	assertStatus(t, resp, 204)
+
+	// User lists hints - should now see only 1 hint
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%d/hints", chalID), "", userTok)
+	assertStatus(t, resp, 200)
+	body = decodeJSON(t, resp)
+	hints = body["hints"].([]any)
+	if len(hints) != 1 {
+		t.Fatalf("expected 1 hint after hiding, got %d", len(hints))
+	}
+
+	// Delete hint 1
+	resp = doRequest(t, "DELETE", fmt.Sprintf("/api/v1/admin/hints/%d", hint1ID), "", adminTok)
+	assertStatus(t, resp, 204)
+
+	// User lists hints - should see 0 hints now
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%d/hints", chalID), "", userTok)
+	assertStatus(t, resp, 200)
+	body = decodeJSON(t, resp)
+	hints = body["hints"].([]any)
+	if len(hints) != 0 {
+		t.Fatalf("expected 0 hints after deletion, got %d", len(hints))
+	}
+
+	// Test invalid hint ID on update/delete
+	resp = doRequest(t, "PUT", "/api/v1/admin/hints/99999", `{"content":"x"}`, adminTok)
+	assertStatus(t, resp, 404)
+	resp = doRequest(t, "DELETE", "/api/v1/admin/hints/99999", "", adminTok)
+	assertStatus(t, resp, 404)
 }
