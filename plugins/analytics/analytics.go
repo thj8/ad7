@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -24,8 +23,94 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/challenges", p.challengeStats)
 }
 
+type overviewResponse struct {
+	TotalUsers         int     `json:"total_users"`
+	TotalChallenges    int     `json:"total_challenges"`
+	TotalSubmissions   int     `json:"total_submissions"`
+	CorrectSubmissions int     `json:"correct_submissions"`
+	AverageSolves      float64 `json:"average_solves"`
+	AverageSolveTime   string  `json:"average_solve_time_seconds"`
+	CompletionRate     float64 `json:"completion_rate"`
+}
+
 func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	var resp overviewResponse
+
+	// Get total challenges in competition
+	err = p.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ?
+	`, compID).Scan(&resp.TotalChallenges)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Get total users who submitted
+	err = p.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ?
+	`, compID).Scan(&resp.TotalUsers)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Get total submissions and correct submissions
+	err = p.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+		FROM submissions WHERE competition_id = ?
+	`, compID).Scan(&resp.TotalSubmissions, &resp.CorrectSubmissions)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate average solves per user (users who have at least one correct submission)
+	if resp.TotalUsers > 0 {
+		var totalCorrectSolves int
+		err = p.db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM submissions
+			WHERE competition_id = ? AND is_correct = 1
+		`, compID).Scan(&totalCorrectSolves)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		resp.AverageSolves = float64(totalCorrectSolves) / float64(resp.TotalUsers)
+
+		// Calculate completion rate (average % of challenges solved per user)
+		if resp.TotalChallenges > 0 {
+			resp.CompletionRate = (resp.AverageSolves / float64(resp.TotalChallenges)) * 100
+		}
+	}
+
+	// Calculate average time to first solve (for challenges that have been solved)
+	// This is the average time between competition start and first correct submission
+	var avgSolveTimeSec sql.NullFloat64
+	err = p.db.QueryRowContext(ctx, `
+		SELECT AVG(TIMESTAMPDIFF(SECOND, c.start_time, s.created_at))
+		FROM submissions s
+		JOIN competitions c ON c.res_id = s.competition_id
+		WHERE s.competition_id = ? AND s.is_correct = 1
+	`, compID).Scan(&avgSolveTimeSec)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	if avgSolveTimeSec.Valid {
+		resp.AverageSolveTime = strconv.FormatFloat(avgSolveTimeSec.Float64, 'f', 2, 64)
+	} else {
+		resp.AverageSolveTime = "0"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
