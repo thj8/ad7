@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"ad7/internal/event"
 	"ad7/internal/model"
 	"ad7/internal/store"
 )
@@ -52,6 +53,14 @@ func (s *SubmissionService) Submit(ctx context.Context, userID string, challenge
 	}
 
 	if isCorrect {
+		var zeroID int64 = 0
+		event.Publish(event.Event{
+			Type:          event.EventCorrectSubmission,
+			UserID:        userID,
+			ChallengeID:   challengeID,
+			CompetitionID: &zeroID,
+			Ctx:           ctx,
+		})
 		return ResultCorrect, nil
 	}
 	return ResultIncorrect, nil
@@ -91,6 +100,13 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, userID string, com
 	}
 
 	if isCorrect {
+		event.Publish(event.Event{
+			Type:          event.EventCorrectSubmission,
+			UserID:        userID,
+			ChallengeID:   challengeID,
+			CompetitionID: &compID,
+			Ctx:           ctx,
+		})
 		return ResultCorrect, nil
 	}
 	return ResultIncorrect, nil
