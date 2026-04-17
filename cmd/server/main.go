@@ -17,6 +17,7 @@ import (
 	"ad7/internal/store"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
+	"ad7/plugins/analytics"
 )
 
 func main() {
@@ -79,6 +80,7 @@ func main() {
 	plugins := []plugin.Plugin{
 		leaderboard.New(),
 		notification.New(),
+		analytics.New(),
 	}
 	for _, p := range plugins {
 		p.Register(r, st.DB(), auth)
