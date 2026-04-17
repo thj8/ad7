@@ -36,11 +36,12 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := p.db.QueryContext(r.Context(), `
 		SELECT res_id, competition_id, challenge_id, title, message, created_at
 		FROM notifications
-		WHERE challenge_id IS NULL
+		WHERE competition_id IS NULL
+		  AND (challenge_id IS NULL
 		   OR challenge_id IN (
 		       SELECT DISTINCT challenge_id FROM submissions
 		       WHERE user_id = ? AND is_correct = 1
-		   )
+		   ))
 		ORDER BY created_at DESC`, userID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)

@@ -42,6 +42,7 @@ func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (
 	if c.EndTime.Before(c.StartTime) {
 		return 0, errors.New("end_time must be after start_time")
 	}
+	c.IsActive = true
 	return s.store.CreateCompetition(ctx, c)
 }
 
