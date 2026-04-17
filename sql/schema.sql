@@ -23,3 +23,12 @@ CREATE TABLE IF NOT EXISTS submissions (
     FOREIGN KEY (challenge_id) REFERENCES challenges(id),
     INDEX idx_user_challenge (user_id, challenge_id)
 );
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    challenge_id INT          NULL,
+    title        VARCHAR(255) NOT NULL,
+    message      TEXT         NOT NULL,
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (challenge_id) REFERENCES challenges(id) ON DELETE CASCADE
+);
