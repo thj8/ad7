@@ -41,7 +41,27 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 }
 
 func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	chalID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req createReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" || len(req.Content) > 4096 {
+		http.Error(w, `{"error":"content is required (max 4096 chars)"}`, http.StatusBadRequest)
+		return
+	}
+
+	_, err = p.db.ExecContext(r.Context(),
+		`INSERT INTO hints (res_id, challenge_id, content) VALUES (?, ?, ?)`,
+		snowflake.Next(), chalID, req.Content)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
 }
 
 func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
