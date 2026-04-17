@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -215,8 +216,85 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categoryResponse{Categories: categories})
 }
 
+type userStats struct {
+	UserID            string  `json:"user_id"`
+	TotalSolves       int     `json:"total_solves"`
+	TotalScore        int     `json:"total_score"`
+	TotalAttempts     int     `json:"total_attempts"`
+	SuccessRate       float64 `json:"success_rate"`
+	FirstSolveTime    string  `json:"first_solve_time"`
+	LastSolveTime     string  `json:"last_solve_time"`
+}
+
+type userStatsResponse struct {
+	Users []userStats `json:"users"`
+}
+
 func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT
+			s.user_id,
+			SUM(CASE WHEN s.is_correct = 1 THEN 1 ELSE 0 END) as total_solves,
+			SUM(CASE WHEN s.is_correct = 1 THEN c.score ELSE 0 END) as total_score,
+			COUNT(*) as total_attempts,
+			MIN(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as first_solve,
+			MAX(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as last_solve
+		FROM submissions s
+		LEFT JOIN challenges c ON c.res_id = s.challenge_id
+		WHERE s.competition_id = ?
+		GROUP BY s.user_id
+		ORDER BY total_score DESC, first_solve ASC
+	`, compID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var users []userStats
+	for rows.Next() {
+		var u userStats
+		var firstSolve, lastSolve sql.NullTime
+		if err := rows.Scan(
+			&u.UserID,
+			&u.TotalSolves,
+			&u.TotalScore,
+			&u.TotalAttempts,
+			&firstSolve,
+			&lastSolve,
+		); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		if u.TotalAttempts > 0 {
+			u.SuccessRate = (float64(u.TotalSolves) / float64(u.TotalAttempts)) * 100
+		}
+
+		if firstSolve.Valid {
+			u.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
+		}
+		if lastSolve.Valid {
+			u.LastSolveTime = lastSolve.Time.Format(time.RFC3339)
+		}
+
+		users = append(users, u)
+	}
+
+	if users == nil {
+		users = []userStats{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userStatsResponse{Users: users})
 }
 
 func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
