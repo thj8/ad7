@@ -797,8 +797,8 @@ func TestHints(t *testing.T) {
 	if len(hints) != 2 {
 		t.Fatalf("expected 2 hints, got %d", len(hints))
 	}
-	hint1ID := int64(hints[0].(map[string]any)["id"].(json.Number))
-	hint2ID := int64(hints[1].(map[string]any)["id"].(json.Number))
+	hint1ID := getID(t, hints[0].(map[string]any))
+	hint2ID := getID(t, hints[1].(map[string]any))
 
 	// Update hint 2 to be invisible
 	visible := false
