@@ -56,3 +56,12 @@ CREATE TABLE IF NOT EXISTS competition_challenges (
     challenge_id   BIGINT NOT NULL,
     UNIQUE INDEX idx_comp_chal (competition_id, challenge_id)
 );
+
+CREATE TABLE IF NOT EXISTS hints (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    res_id      BIGINT       NOT NULL UNIQUE,
+    challenge_id BIGINT      NOT NULL,
+    content     TEXT         NOT NULL,
+    is_visible  TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
