@@ -21,6 +21,7 @@ import (
 	"ad7/internal/plugin"
 	"ad7/internal/service"
 	"ad7/internal/store"
+	"ad7/plugins/analytics"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
 )
@@ -84,7 +85,7 @@ func TestMain(m *testing.M) {
 		})
 	})
 
-	plugins := []plugin.Plugin{leaderboard.New(), notification.New()}
+	plugins := []plugin.Plugin{leaderboard.New(), notification.New(), analytics.New()}
 	for _, p := range plugins {
 		p.Register(r, st.DB(), auth)
 	}
@@ -657,5 +658,110 @@ func TestCompetitionNotifications(t *testing.T) {
 	ns := b["notifications"].([]any)
 	if len(ns) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(ns))
+	}
+}
+
+func TestAnalyticsOverview(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Test Comp","description":"Test","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create challenge
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Test Chal","category":"web","description":"desc","score":100,"flag":"flag{test}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	// Add challenge to competition
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, chalID), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Create test submission
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%d/challenges/%d/submit", compID, chalID),
+		`{"flag":"flag{test}"}`, userTok)
+	assertStatus(t, resp, 200)
+
+	// Make request to analytics overview
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/analytics/overview", compID), "", userTok)
+	assertStatus(t, resp, 200)
+
+	b := decodeJSON(t, resp)
+	if b["total_users"] != json.Number("1") {
+		t.Errorf("expected total_users=1, got %v", b["total_users"])
+	}
+	if b["total_challenges"] != json.Number("1") {
+		t.Errorf("expected total_challenges=1, got %v", b["total_challenges"])
+	}
+	if b["total_submissions"] != json.Number("1") {
+		t.Errorf("expected total_submissions=1, got %v", b["total_submissions"])
+	}
+	if b["correct_submissions"] != json.Number("1") {
+		t.Errorf("expected correct_submissions=1, got %v", b["correct_submissions"])
+	}
+	if b["average_solves"] != json.Number("1") {
+		t.Errorf("expected average_solves=1.0, got %v", b["average_solves"])
+	}
+}
+
+func TestAnalyticsCategories(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Test Comp","description":"Test","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create challenges in different categories
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Web Chal","category":"web","description":"desc","score":100,"flag":"flag{web}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID1 := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Crypto Chal","category":"crypto","description":"desc","score":200,"flag":"flag{crypto}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID2 := getID(t, decodeJSON(t, resp))
+
+	// Add challenges to competition
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, chalID1), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, chalID2), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Make request
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/analytics/categories", compID), "", userTok)
+	assertStatus(t, resp, 200)
+
+	b := decodeJSON(t, resp)
+	categories := b["categories"].([]any)
+
+	// Should have at least the two categories
+	catMap := make(map[string]json.Number)
+	for _, c := range categories {
+		cat := c.(map[string]any)
+		catMap[cat["category"].(string)] = cat["total_challenges"].(json.Number)
+	}
+
+	if catMap["web"] != json.Number("1") {
+		t.Errorf("expected web category with 1 challenge, got %v", catMap["web"])
+	}
+	if catMap["crypto"] != json.Number("1") {
+		t.Errorf("expected crypto category with 1 challenge, got %v", catMap["crypto"])
 	}
 }
