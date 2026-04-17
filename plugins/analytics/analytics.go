@@ -297,6 +297,114 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(userStatsResponse{Users: users})
 }
 
+type challengeStats struct {
+	ChallengeID       int64   `json:"challenge_id"`
+	Title             string  `json:"title"`
+	Category          string  `json:"category"`
+	Score             int     `json:"score"`
+	TotalSolves       int     `json:"total_solves"`
+	TotalAttempts     int     `json:"total_attempts"`
+	SuccessRate       float64 `json:"success_rate"`
+	UniqueUsersSolved int     `json:"unique_users_solved"`
+	FirstSolveTime    string  `json:"first_solve_time"`
+	AverageSolveTime  string  `json:"average_solve_time_seconds"`
+}
+
+type challengeStatsResponse struct {
+	Challenges []challengeStats `json:"challenges"`
+}
+
 func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get all challenges in competition first
+	chalRows, err := p.db.QueryContext(ctx, `
+		SELECT c.res_id, c.title, c.category, c.score
+		FROM competition_challenges cc
+		JOIN challenges c ON c.res_id = cc.challenge_id
+		WHERE cc.competition_id = ?
+	`, compID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	defer chalRows.Close()
+
+	var challenges []challengeStats
+	for chalRows.Next() {
+		var cs challengeStats
+		if err := chalRows.Scan(&cs.ChallengeID, &cs.Title, &cs.Category, &cs.Score); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Get solve stats for this challenge
+		var firstSolve sql.NullTime
+		err = p.db.QueryRowContext(ctx, `
+			SELECT
+				SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+				COUNT(*),
+				COUNT(DISTINCT CASE WHEN is_correct = 1 THEN user_id ELSE NULL END),
+				MIN(CASE WHEN is_correct = 1 THEN created_at ELSE NULL END)
+			FROM submissions
+			WHERE competition_id = ? AND challenge_id = ?
+		`, compID, cs.ChallengeID).Scan(
+			&cs.TotalSolves,
+			&cs.TotalAttempts,
+			&cs.UniqueUsersSolved,
+			&firstSolve,
+		)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		if cs.TotalAttempts > 0 {
+			cs.SuccessRate = (float64(cs.TotalSolves) / float64(cs.TotalAttempts)) * 100
+		}
+
+		if firstSolve.Valid {
+			cs.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
+		}
+
+		// Get average time from first submission to correct submission per user
+		var avgSolveTime sql.NullFloat64
+		err = p.db.QueryRowContext(ctx, `
+			SELECT AVG(TIMESTAMPDIFF(SECOND, first_submit, correct_submit))
+			FROM (
+				SELECT
+					user_id,
+					MIN(created_at) as first_submit,
+					MIN(CASE WHEN is_correct = 1 THEN created_at ELSE NULL END) as correct_submit
+				FROM submissions
+				WHERE competition_id = ? AND challenge_id = ?
+				GROUP BY user_id
+				HAVING correct_submit IS NOT NULL
+			) user_times
+		`, compID, cs.ChallengeID).Scan(&avgSolveTime)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if avgSolveTime.Valid {
+			cs.AverageSolveTime = strconv.FormatFloat(avgSolveTime.Float64, 'f', 2, 64)
+		} else {
+			cs.AverageSolveTime = "0"
+		}
+
+		challenges = append(challenges, cs)
+	}
+
+	if challenges == nil {
+		challenges = []challengeStats{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(challengeStatsResponse{Challenges: challenges})
 }
