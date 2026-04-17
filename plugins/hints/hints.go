@@ -148,5 +148,36 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	chalID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
+		return
+	}
+
+	rows, err := p.db.QueryContext(r.Context(),
+		`SELECT res_id, content, created_at FROM hints
+		 WHERE challenge_id = ? AND is_visible = 1
+		 ORDER BY created_at ASC`, chalID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var hints []hint
+	for rows.Next() {
+		var h hint
+		if err := rows.Scan(&h.ResID, &h.Content, &h.CreatedAt); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		hints = append(hints, h)
+	}
+
+	if hints == nil {
+		hints = []hint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"hints": hints})
 }
