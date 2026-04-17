@@ -65,7 +65,59 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	hintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req updateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Validate content if provided
+	if req.Content != nil && (len(*req.Content) == 0 || len(*req.Content) > 4096) {
+		http.Error(w, `{"error":"content must be 1-4096 chars"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Get current values first
+	var currentContent string
+	var currentIsVisible bool
+	err = p.db.QueryRowContext(r.Context(),
+		`SELECT content, is_visible FROM hints WHERE res_id = ?`, hintID).
+		Scan(&currentContent, &currentIsVisible)
+	if err == sql.ErrNoRows {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Determine new values
+	newContent := currentContent
+	if req.Content != nil {
+		newContent = *req.Content
+	}
+	newIsVisible := currentIsVisible
+	if req.IsVisible != nil {
+		newIsVisible = *req.IsVisible
+	}
+
+	// Update
+	_, err = p.db.ExecContext(r.Context(),
+		`UPDATE hints SET content = ?, is_visible = ? WHERE res_id = ?`,
+		newContent, newIsVisible, hintID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
