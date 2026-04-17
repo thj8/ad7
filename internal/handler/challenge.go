@@ -32,7 +32,11 @@ func (h *ChallengeHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChallengeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	c, err := h.svc.Get(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -57,6 +61,12 @@ func (h *ChallengeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if e := validateLen("title", req.Title, 255); e != "" ||
+		validateLen("flag", req.Flag, 255) != "" ||
+		validateLen("description", req.Description, maxFieldLen) != "" {
+		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
 	c := &model.Challenge{
@@ -84,10 +94,20 @@ type updateRequest struct {
 }
 
 func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if e := validateLen("title", req.Title, 255); e != "" ||
+		validateLen("flag", req.Flag, 255) != "" ||
+		validateLen("description", req.Description, maxFieldLen) != "" {
+		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
 	patch := &model.Challenge{
@@ -109,7 +129,11 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -117,7 +141,10 @@ func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func parseID(r *http.Request) int64 {
-	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	return id
+func parseID(r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }

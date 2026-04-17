@@ -60,8 +60,8 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 	compID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var req createReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" {
-		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Message == "" {
+		http.Error(w, `{"error":"title and message are required"}`, http.StatusBadRequest)
 		return
 	}
 	_, err := p.db.ExecContext(r.Context(),

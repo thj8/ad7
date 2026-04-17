@@ -33,7 +33,11 @@ func (h *CompetitionHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	c, err := h.svc.Get(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -47,7 +51,11 @@ func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CompetitionHandler) ListChallenges(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	cs, err := h.svc.ListChallenges(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -70,6 +78,11 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req compCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if validateLen("title", req.Title, 255) != "" ||
+		validateLen("description", req.Description, maxFieldLen) != "" {
+		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
 	startTime, err := time.Parse(time.RFC3339, req.StartTime)
@@ -105,10 +118,19 @@ type compUpdateRequest struct {
 }
 
 func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	var req compUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if validateLen("title", req.Title, 255) != "" ||
+		validateLen("description", req.Description, maxFieldLen) != "" {
+		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
 	patch := &model.Competition{
@@ -143,7 +165,11 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CompetitionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := parseID(r)
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -164,7 +190,11 @@ func (h *CompetitionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CompetitionHandler) AddChallenge(w http.ResponseWriter, r *http.Request) {
-	compID := parseID(r)
+	compID, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 	var body struct {
 		ChallengeID int64 `json:"challenge_id"`
 	}
@@ -180,8 +210,16 @@ func (h *CompetitionHandler) AddChallenge(w http.ResponseWriter, r *http.Request
 }
 
 func (h *CompetitionHandler) RemoveChallenge(w http.ResponseWriter, r *http.Request) {
-	compID := parseID(r)
-	chalID, _ := strconv.ParseInt(chi.URLParam(r, "challenge_id"), 10, 64)
+	compID, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	chalID, err := strconv.ParseInt(chi.URLParam(r, "challenge_id"), 10, 64)
+	if err != nil || chalID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid challenge_id")
+		return
+	}
 	if err := h.svc.RemoveChallenge(r.Context(), compID, chalID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
