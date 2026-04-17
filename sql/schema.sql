@@ -29,8 +29,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 CREATE TABLE IF NOT EXISTS notifications (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     res_id         BIGINT       NOT NULL UNIQUE,
-    competition_id BIGINT       NULL,
-    challenge_id   BIGINT       NULL,
+    competition_id BIGINT       NOT NULL,
     title          VARCHAR(255) NOT NULL,
     message        TEXT         NOT NULL,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP

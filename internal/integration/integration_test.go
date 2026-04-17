@@ -418,102 +418,6 @@ func TestAdminListSubmissions(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestLeaderboard(t *testing.T) {
-	cleanup(t)
-	adminTok := makeToken("admin1", "admin")
-	userTok := makeToken("user1", "user")
-
-	resp := doRequest(t, "POST", "/api/v1/admin/challenges",
-		`{"title":"LB","description":"D","score":100,"flag":"flag{lb}"}`, adminTok)
-	assertStatus(t, resp, 201)
-	b := decodeJSON(t, resp)
-	id := getID(t, b)
-
-	doRequest(t, "PUT", fmt.Sprintf("/api/v1/admin/challenges/%d", id),
-		`{"title":"LB","description":"D","score":100,"flag":"flag{lb}","is_enabled":true}`, adminTok).Body.Close()
-	doRequest(t, "POST", fmt.Sprintf("/api/v1/challenges/%d/submit", id),
-		`{"flag":"flag{lb}"}`, userTok).Body.Close()
-
-	resp = doRequest(t, "GET", "/api/v1/leaderboard", "", userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	board := b["leaderboard"].([]any)
-	if len(board) == 0 {
-		t.Fatal("expected at least 1 leaderboard entry")
-	}
-	if board[0].(map[string]any)["user_id"] != "user1" {
-		t.Fatalf("expected user1 at rank 1")
-	}
-
-	resp = doRequest(t, "GET", "/api/v1/leaderboard", "", "")
-	assertStatus(t, resp, 401)
-	resp.Body.Close()
-}
-
-func TestNotifications(t *testing.T) {
-	cleanup(t)
-	testDB.Exec("DELETE FROM notifications")
-	adminTok := makeToken("admin1", "admin")
-	userTok := makeToken("user1", "user")
-
-	// global notification
-	resp := doRequest(t, "POST", "/api/v1/admin/notifications",
-		`{"title":"比赛开始","message":"祝好运"}`, adminTok)
-	assertStatus(t, resp, 201)
-	resp.Body.Close()
-
-	resp = doRequest(t, "GET", "/api/v1/notifications", "", userTok)
-	assertStatus(t, resp, 200)
-	b := decodeJSON(t, resp)
-	if len(b["notifications"].([]any)) == 0 {
-		t.Fatal("expected global notification")
-	}
-
-	// per-challenge notification
-	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
-		`{"title":"N1","description":"D","score":100,"flag":"flag{n}"}`, adminTok)
-	assertStatus(t, resp, 201)
-	cb := decodeJSON(t, resp)
-	cid := getID(t, cb)
-
-	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/challenges/%d/notifications", cid),
-		`{"title":"提示","message":"看看源码"}`, adminTok)
-	assertStatus(t, resp, 201)
-	resp.Body.Close()
-
-	// not visible before solving
-	resp = doRequest(t, "GET", "/api/v1/notifications", "", userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	if len(b["notifications"].([]any)) != 1 {
-		t.Fatal("should only see global notification before solving")
-	}
-
-	// solve then visible
-	doRequest(t, "PUT", fmt.Sprintf("/api/v1/admin/challenges/%d", cid),
-		`{"title":"N1","description":"D","score":100,"flag":"flag{n}","is_enabled":true}`, adminTok).Body.Close()
-	doRequest(t, "POST", fmt.Sprintf("/api/v1/challenges/%d/submit", cid),
-		`{"flag":"flag{n}"}`, userTok).Body.Close()
-
-	resp = doRequest(t, "GET", "/api/v1/notifications", "", userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	if len(b["notifications"].([]any)) != 2 {
-		t.Fatalf("expected 2 notifications after solve, got %d", len(b["notifications"].([]any)))
-	}
-
-	// 403
-	resp = doRequest(t, "POST", "/api/v1/admin/notifications",
-		`{"title":"x","message":"y"}`, userTok)
-	assertStatus(t, resp, 403)
-	resp.Body.Close()
-
-	// 401
-	resp = doRequest(t, "GET", "/api/v1/notifications", "", "")
-	assertStatus(t, resp, 401)
-	resp.Body.Close()
-}
-
 func TestCompetitions(t *testing.T) {
 	cleanup(t)
 	adminTok := makeToken("admin1", "admin")
@@ -721,15 +625,6 @@ func TestCompetitionLeaderboard(t *testing.T) {
 	if first["user_id"] != "user1" {
 		t.Fatalf("expected user1 at rank 1, got %v", first["user_id"])
 	}
-
-	// Global leaderboard should be empty (no non-competition submissions)
-	resp = doRequest(t, "GET", "/api/v1/leaderboard", "", u1)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	globalBoard := b["leaderboard"].([]any)
-	if len(globalBoard) != 0 {
-		t.Fatalf("global leaderboard should be empty, got %d entries", len(globalBoard))
-	}
 }
 
 func TestCompetitionNotifications(t *testing.T) {
@@ -757,14 +652,5 @@ func TestCompetitionNotifications(t *testing.T) {
 	ns := b["notifications"].([]any)
 	if len(ns) != 1 {
 		t.Fatalf("expected 1 notification, got %d", len(ns))
-	}
-
-	// Global notifications should NOT include competition notifications
-	resp = doRequest(t, "GET", "/api/v1/notifications", "", userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	globalNs := b["notifications"].([]any)
-	if len(globalNs) != 0 {
-		t.Fatalf("global notifications should be empty, got %d", len(globalNs))
 	}
 }

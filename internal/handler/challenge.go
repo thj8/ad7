@@ -117,7 +117,7 @@ func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func parseID(r *http.Request) int {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+func parseID(r *http.Request) int64 {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	return id
 }
