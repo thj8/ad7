@@ -33,6 +33,19 @@ type overviewResponse struct {
 	CompletionRate     float64 `json:"completion_rate"`
 }
 
+type categoryStats struct {
+	Category         string  `json:"category"`
+	TotalChallenges  int     `json:"total_challenges"`
+	TotalSolves      int     `json:"total_solves"`
+	UniqueUsersSolved int    `json:"unique_users_solved"`
+	AverageSolves    float64 `json:"average_solves_per_user"`
+	SuccessRate      float64 `json:"success_rate"`
+}
+
+type categoryResponse struct {
+	Categories []categoryStats `json:"categories"`
+}
+
 func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -114,7 +127,92 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get all challenges in this competition with their categories
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT c.category, COUNT(DISTINCT cc.challenge_id) as total_challenges
+		FROM competition_challenges cc
+		JOIN challenges c ON c.res_id = cc.challenge_id
+		WHERE cc.competition_id = ?
+		GROUP BY c.category
+	`, compID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var categories []categoryStats
+	for rows.Next() {
+		var cat categoryStats
+		if err := rows.Scan(&cat.Category, &cat.TotalChallenges); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Get total correct solves for this category
+		err = p.db.QueryRowContext(ctx, `
+			SELECT COUNT(*), COUNT(DISTINCT s.user_id)
+			FROM submissions s
+			JOIN challenges c ON c.res_id = s.challenge_id
+			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
+			WHERE s.competition_id = ? AND cc.competition_id = ?
+			AND s.is_correct = 1 AND c.category = ?
+		`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Get total users in competition
+		var totalUsers int
+		err = p.db.QueryRowContext(ctx, `
+			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ?
+		`, compID).Scan(&totalUsers)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		if totalUsers > 0 {
+			cat.AverageSolves = float64(cat.TotalSolves) / float64(totalUsers)
+		}
+
+		// Get total attempts (all submissions) for this category
+		var totalAttempts int
+		err = p.db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM submissions s
+			JOIN challenges c ON c.res_id = s.challenge_id
+			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
+			WHERE s.competition_id = ? AND cc.competition_id = ?
+			AND c.category = ?
+		`, compID, compID, cat.Category).Scan(&totalAttempts)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+
+		if totalAttempts > 0 {
+			cat.SuccessRate = (float64(cat.TotalSolves) / float64(totalAttempts)) * 100
+		}
+
+		categories = append(categories, cat)
+	}
+
+	if categories == nil {
+		categories = []categoryStats{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(categoryResponse{Categories: categories})
 }
 
 func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
