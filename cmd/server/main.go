@@ -12,8 +12,11 @@ import (
 	"ad7/internal/config"
 	"ad7/internal/handler"
 	"ad7/internal/middleware"
+	"ad7/internal/plugin"
 	"ad7/internal/service"
 	"ad7/internal/store"
+	"ad7/plugins/leaderboard"
+	"ad7/plugins/notification"
 )
 
 func main() {
@@ -58,6 +61,14 @@ func main() {
 			r.Get("/submissions", submissionH.List)
 		})
 	})
+
+	plugins := []plugin.Plugin{
+		leaderboard.New(),
+		notification.New(),
+	}
+	for _, p := range plugins {
+		p.Register(r, st.DB(), auth)
+	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("listening on %s", addr)
