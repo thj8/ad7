@@ -121,7 +121,30 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	hintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
+		return
+	}
+
+	result, err := p.db.ExecContext(r.Context(),
+		`DELETE FROM hints WHERE res_id = ?`, hintID)
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	if rows == 0 {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
