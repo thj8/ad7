@@ -371,6 +371,11 @@ func TestAdminDeleteChallenge(t *testing.T) {
 	resp = doRequest(t, "DELETE", path, "", adminTok)
 	assertStatus(t, resp, 204)
 	resp.Body.Close()
+
+	// verify soft-deleted challenge is no longer accessible
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%d", id), "", userTok)
+	assertStatus(t, resp, 404)
+	resp.Body.Close()
 }
 
 func TestAdminListSubmissions(t *testing.T) {

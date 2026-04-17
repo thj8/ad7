@@ -31,7 +31,7 @@ func (s *Store) DB() *sql.DB  { return s.db }
 func (s *Store) ListEnabled(ctx context.Context) ([]model.Challenge, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT res_id, title, category, description, score, is_enabled, created_at, updated_at
-		 FROM challenges WHERE is_enabled = 1`)
+		 FROM challenges WHERE is_enabled = 1 AND is_deleted = 0`)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (s *Store) GetEnabledByID(ctx context.Context, resID int64) (*model.Challen
 	var c model.Challenge
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, category, description, score, flag, is_enabled, created_at, updated_at
-		 FROM challenges WHERE res_id = ? AND is_enabled = 1`, resID).
+		 FROM challenges WHERE res_id = ? AND is_enabled = 1 AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Category, &c.Description,
 			&c.Score, &c.Flag, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -65,7 +65,7 @@ func (s *Store) GetByID(ctx context.Context, resID int64) (*model.Challenge, err
 	var c model.Challenge
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, category, description, score, flag, is_enabled, created_at, updated_at
-		 FROM challenges WHERE res_id = ?`, resID).
+		 FROM challenges WHERE res_id = ? AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Category, &c.Description,
 			&c.Score, &c.Flag, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -94,7 +94,7 @@ func (s *Store) Update(ctx context.Context, c *model.Challenge) error {
 }
 
 func (s *Store) Delete(ctx context.Context, resID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM challenges WHERE res_id = ?`, resID)
+	_, err := s.db.ExecContext(ctx, `UPDATE challenges SET is_deleted=1 WHERE res_id = ?`, resID)
 	return err
 }
 
@@ -148,7 +148,7 @@ func (s *Store) ListSubmissions(ctx context.Context, userID string, challengeID 
 func (s *Store) ListCompetitions(ctx context.Context) ([]model.Competition, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
-		 FROM competitions ORDER BY created_at DESC`)
+		 FROM competitions WHERE is_deleted = 0 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (s *Store) ListCompetitions(ctx context.Context) ([]model.Competition, erro
 func (s *Store) ListActiveCompetitions(ctx context.Context) ([]model.Competition, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
-		 FROM competitions WHERE is_active = 1 ORDER BY created_at DESC`)
+		 FROM competitions WHERE is_active = 1 AND is_deleted = 0 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (s *Store) GetCompetitionByID(ctx context.Context, resID int64) (*model.Com
 	var c model.Competition
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
-		 FROM competitions WHERE res_id = ?`, resID).
+		 FROM competitions WHERE res_id = ? AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -215,7 +215,7 @@ func (s *Store) UpdateCompetition(ctx context.Context, c *model.Competition) err
 
 func (s *Store) DeleteCompetition(ctx context.Context, resID int64) error {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM competition_challenges WHERE competition_id = ?`, resID)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM competitions WHERE res_id = ?`, resID)
+	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ?`, resID)
 	return err
 }
 
@@ -238,7 +238,7 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID int64) ([]model.C
 		`SELECT c.res_id, c.title, c.category, c.description, c.score, c.is_enabled, c.created_at, c.updated_at
 		 FROM challenges c
 		 JOIN competition_challenges cc ON cc.challenge_id = c.res_id
-		 WHERE cc.competition_id = ? AND c.is_enabled = 1`, compID)
+		 WHERE cc.competition_id = ? AND c.is_enabled = 1 AND c.is_deleted = 0`, compID)
 	if err != nil {
 		return nil, err
 	}
