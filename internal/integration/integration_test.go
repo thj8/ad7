@@ -18,8 +18,11 @@ import (
 
 	"ad7/internal/handler"
 	"ad7/internal/middleware"
+	"ad7/internal/plugin"
 	"ad7/internal/service"
 	"ad7/internal/store"
+	"ad7/plugins/leaderboard"
+	"ad7/plugins/notification"
 )
 
 const (
@@ -50,8 +53,10 @@ func TestMain(m *testing.M) {
 	auth := middleware.NewAuth(testSecret, adminRole)
 	challengeSvc := service.NewChallengeService(st)
 	submissionSvc := service.NewSubmissionService(st, st)
+	compSvc := service.NewCompetitionService(st)
 	challengeH := handler.NewChallengeHandler(challengeSvc)
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
+	compH := handler.NewCompetitionHandler(compSvc)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Recoverer)
@@ -60,14 +65,29 @@ func TestMain(m *testing.M) {
 		r.Get("/challenges", challengeH.List)
 		r.Get("/challenges/{id}", challengeH.Get)
 		r.Post("/challenges/{id}/submit", submissionH.Submit)
+		r.Get("/competitions", compH.List)
+		r.Get("/competitions/{id}", compH.Get)
+		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
+		r.Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Post("/challenges", challengeH.Create)
 			r.Put("/challenges/{id}", challengeH.Update)
 			r.Delete("/challenges/{id}", challengeH.Delete)
 			r.Get("/submissions", submissionH.List)
+			r.Post("/competitions", compH.Create)
+			r.Get("/competitions", compH.ListAll)
+			r.Put("/competitions/{id}", compH.Update)
+			r.Delete("/competitions/{id}", compH.Delete)
+			r.Post("/competitions/{id}/challenges", compH.AddChallenge)
+			r.Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
 		})
 	})
+
+	plugins := []plugin.Plugin{leaderboard.New(), notification.New()}
+	for _, p := range plugins {
+		p.Register(r, st.DB(), auth)
+	}
 
 	testServer = httptest.NewServer(r)
 	defer testServer.Close()
@@ -110,18 +130,36 @@ func doRequest(t *testing.T, method, path, body, token string) *http.Response {
 
 func cleanup(t *testing.T) {
 	t.Helper()
+	testDB.Exec("DELETE FROM competition_challenges")
+	testDB.Exec("DELETE FROM notifications")
 	testDB.Exec("DELETE FROM submissions")
+	testDB.Exec("DELETE FROM competitions")
 	testDB.Exec("DELETE FROM challenges")
 }
 
 func decodeJSON(t *testing.T, r *http.Response) map[string]any {
 	t.Helper()
 	defer r.Body.Close()
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
 	var m map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+	if err := dec.Decode(&m); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
 	return m
+}
+
+func getID(t *testing.T, m map[string]any) int64 {
+	t.Helper()
+	n, ok := m["id"].(json.Number)
+	if !ok {
+		t.Fatalf("id not a json.Number: %T %v", m["id"], m["id"])
+	}
+	v, err := n.Int64()
+	if err != nil {
+		t.Fatalf("id parse: %v", err)
+	}
+	return v
 }
 
 func assertStatus(t *testing.T, resp *http.Response, want int) {
@@ -163,7 +201,7 @@ func TestGetChallenge(t *testing.T) {
 		`{"title":"T1","description":"D","score":100,"flag":"flag{x}"}`, adminTok)
 	assertStatus(t, resp, 201)
 	b := decodeJSON(t, resp)
-	id := int(b["id"].(float64))
+	id := getID(t, b)
 
 	// 200 found
 	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%d", id), "", userTok)
@@ -197,7 +235,7 @@ func TestSubmitFlag(t *testing.T) {
 		`{"title":"T2","description":"D","score":100,"flag":"flag{correct}"}`, adminTok)
 	assertStatus(t, resp, 201)
 	b := decodeJSON(t, resp)
-	id := int(b["id"].(float64))
+	id := getID(t, b)
 	path := fmt.Sprintf("/api/v1/challenges/%d/submit", id)
 
 	// wrong flag
@@ -278,7 +316,7 @@ func TestAdminUpdateChallenge(t *testing.T) {
 		`{"title":"T4","description":"D","score":100,"flag":"flag{u}"}`, adminTok)
 	assertStatus(t, resp, 201)
 	b := decodeJSON(t, resp)
-	id := int(b["id"].(float64))
+	id := getID(t, b)
 	path := fmt.Sprintf("/api/v1/admin/challenges/%d", id)
 
 	// 204 update
@@ -316,7 +354,7 @@ func TestAdminDeleteChallenge(t *testing.T) {
 		`{"title":"T5","description":"D","score":100,"flag":"flag{d}"}`, adminTok)
 	assertStatus(t, resp, 201)
 	b := decodeJSON(t, resp)
-	id := int(b["id"].(float64))
+	id := getID(t, b)
 	path := fmt.Sprintf("/api/v1/admin/challenges/%d", id)
 
 	// 403
@@ -345,7 +383,7 @@ func TestAdminListSubmissions(t *testing.T) {
 		`{"title":"T6","description":"D","score":100,"flag":"flag{s}"}`, adminTok)
 	assertStatus(t, resp, 201)
 	b := decodeJSON(t, resp)
-	id := int(b["id"].(float64))
+	id := getID(t, b)
 
 	doRequest(t, "POST", fmt.Sprintf("/api/v1/challenges/%d/submit", id),
 		`{"flag":"flag{s}"}`, userTok)
@@ -378,4 +416,241 @@ func TestAdminListSubmissions(t *testing.T) {
 	resp = doRequest(t, "GET", "/api/v1/admin/submissions", "", "")
 	assertStatus(t, resp, 401)
 	resp.Body.Close()
+}
+
+func TestCompetitions(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"CTF Round 1","description":"First round","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	b := decodeJSON(t, resp)
+	compID := getID(t, b)
+
+	// List active competitions
+	resp = doRequest(t, "GET", "/api/v1/competitions", "", userTok)
+	assertStatus(t, resp, 200)
+	b = decodeJSON(t, resp)
+	comps := b["competitions"].([]any)
+	if len(comps) == 0 {
+		t.Fatal("expected at least 1 competition")
+	}
+
+	// Get competition detail
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d", compID), "", userTok)
+	assertStatus(t, resp, 200)
+	b = decodeJSON(t, resp)
+	if b["title"] != "CTF Round 1" {
+		t.Fatalf("expected title 'CTF Round 1', got %v", b["title"])
+	}
+
+	// Update competition
+	resp = doRequest(t, "PUT", fmt.Sprintf("/api/v1/admin/competitions/%d", compID),
+		`{"title":"CTF Round 1 Updated","description":"Updated","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z","is_active":true}`, adminTok)
+	assertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Delete competition
+	resp = doRequest(t, "DELETE", fmt.Sprintf("/api/v1/admin/competitions/%d", compID), "", adminTok)
+	assertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// 404 after delete
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d", compID), "", userTok)
+	assertStatus(t, resp, 404)
+	resp.Body.Close()
+
+	// 403 non-admin create
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"X","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, userTok)
+	assertStatus(t, resp, 403)
+	resp.Body.Close()
+
+	// 400 missing title
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 400)
+	resp.Body.Close()
+}
+
+func TestCompetitionChallenges(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create challenge
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Chal1","description":"D","score":100,"flag":"flag{x}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	// Add challenge to competition
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, chalID), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// List competition challenges
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/challenges", compID), "", userTok)
+	assertStatus(t, resp, 200)
+	b := decodeJSON(t, resp)
+	chals := b["challenges"].([]any)
+	if len(chals) != 1 {
+		t.Fatalf("expected 1 challenge, got %d", len(chals))
+	}
+
+	// Remove challenge from competition
+	resp = doRequest(t, "DELETE", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges/%d", compID, chalID), "", adminTok)
+	assertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify empty
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/challenges", compID), "", userTok)
+	assertStatus(t, resp, 200)
+	b = decodeJSON(t, resp)
+	chals = b["challenges"].([]any)
+	if len(chals) != 0 {
+		t.Fatalf("expected 0 challenges, got %d", len(chals))
+	}
+}
+
+func TestSubmitInCompetition(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition + challenge + add to comp
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"Chal","description":"D","score":200,"flag":"flag{comp}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, chalID), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	submitPath := fmt.Sprintf("/api/v1/competitions/%d/challenges/%d/submit", compID, chalID)
+
+	// Correct flag
+	resp = doRequest(t, "POST", submitPath, `{"flag":"flag{comp}"}`, userTok)
+	assertStatus(t, resp, 200)
+	b := decodeJSON(t, resp)
+	if b["success"] != true {
+		t.Fatalf("expected success=true, got %v", b["success"])
+	}
+
+	// Already solved
+	resp = doRequest(t, "POST", submitPath, `{"flag":"flag{comp}"}`, userTok)
+	assertStatus(t, resp, 200)
+	b = decodeJSON(t, resp)
+	if b["message"] != "already_solved" {
+		t.Fatalf("expected already_solved, got %v", b["message"])
+	}
+
+	// Wrong flag with different user
+	user2Tok := makeToken("user2", "user")
+	resp = doRequest(t, "POST", submitPath, `{"flag":"wrong"}`, user2Tok)
+	assertStatus(t, resp, 200)
+	b = decodeJSON(t, resp)
+	if b["success"] != false {
+		t.Fatal("expected success=false for wrong flag")
+	}
+
+	// 401 no token
+	resp = doRequest(t, "POST", submitPath, `{"flag":"x"}`, "")
+	assertStatus(t, resp, 401)
+	resp.Body.Close()
+}
+
+func TestCompetitionLeaderboard(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	u1 := makeToken("user1", "user")
+	u2 := makeToken("user2", "user")
+
+	// Create competition + 2 challenges
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"CompLB","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create 2 challenges
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"C1","description":"D","score":100,"flag":"flag{1}"}`, adminTok)
+	ch1 := getID(t, decodeJSON(t, resp))
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"C2","description":"D","score":200,"flag":"flag{2}"}`, adminTok)
+	ch2 := getID(t, decodeJSON(t, resp))
+
+	// Add both to competition
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, ch1), adminTok).Body.Close()
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":%d}`, ch2), adminTok).Body.Close()
+
+	// user1 solves both
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%d/challenges/%d/submit", compID, ch1),
+		`{"flag":"flag{1}"}`, u1).Body.Close()
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%d/challenges/%d/submit", compID, ch2),
+		`{"flag":"flag{2}"}`, u1).Body.Close()
+
+	// user2 solves only ch1
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%d/challenges/%d/submit", compID, ch1),
+		`{"flag":"flag{1}"}`, u2).Body.Close()
+
+	// Competition leaderboard: user1=300, user2=100
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/leaderboard", compID), "", u1)
+	assertStatus(t, resp, 200)
+	b := decodeJSON(t, resp)
+	board := b["leaderboard"].([]any)
+	if len(board) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(board))
+	}
+	first := board[0].(map[string]any)
+	if first["user_id"] != "user1" {
+		t.Fatalf("expected user1 at rank 1, got %v", first["user_id"])
+	}
+}
+
+func TestCompetitionNotifications(t *testing.T) {
+	cleanup(t)
+	testDB.Exec("DELETE FROM notifications")
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"CompN","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create competition notification
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%d/notifications", compID),
+		`{"title":"比赛提示","message":"注意时间"}`, adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Get competition notifications
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/competitions/%d/notifications", compID), "", userTok)
+	assertStatus(t, resp, 200)
+	b := decodeJSON(t, resp)
+	ns := b["notifications"].([]any)
+	if len(ns) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(ns))
+	}
 }

@@ -22,8 +22,8 @@ func (s *ChallengeService) List(ctx context.Context) ([]model.Challenge, error) 
 	return s.store.ListEnabled(ctx)
 }
 
-func (s *ChallengeService) Get(ctx context.Context, id int) (*model.Challenge, error) {
-	c, err := s.store.GetEnabledByID(ctx, id)
+func (s *ChallengeService) Get(ctx context.Context, resID int64) (*model.Challenge, error) {
+	c, err := s.store.GetEnabledByID(ctx, resID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (int6
 	return s.store.Create(ctx, c)
 }
 
-func (s *ChallengeService) Update(ctx context.Context, id int, patch *model.Challenge) error {
-	existing, err := s.store.GetByID(ctx, id)
+func (s *ChallengeService) Update(ctx context.Context, resID int64, patch *model.Challenge) error {
+	existing, err := s.store.GetByID(ctx, resID)
 	if err != nil {
 		return err
 	}
@@ -74,6 +74,6 @@ func (s *ChallengeService) Update(ctx context.Context, id int, patch *model.Chal
 	return s.store.Update(ctx, existing)
 }
 
-func (s *ChallengeService) Delete(ctx context.Context, id int) error {
-	return s.store.Delete(ctx, id)
+func (s *ChallengeService) Delete(ctx context.Context, resID int64) error {
+	return s.store.Delete(ctx, resID)
 }

@@ -50,3 +50,9 @@ Tests in `internal/integration/` connect to a real MySQL instance. Constants at 
 - `testSecret` — JWT signing secret used by the test router (different from production secret)
 
 Each test calls `cleanup(t)` which deletes all submissions then all challenges (order matters due to FK constraint).
+
+
+## 约束
+- 每次添加新功能，都必须添加完成的测试用例
+- 改一个bug，要写一个测试用例，保证此bug不会再次发生
+- 数据库不要使用外键关联

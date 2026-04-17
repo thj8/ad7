@@ -38,9 +38,11 @@ func main() {
 
 	challengeSvc := service.NewChallengeService(st)
 	submissionSvc := service.NewSubmissionService(st, st)
+	compSvc := service.NewCompetitionService(st)
 
 	challengeH := handler.NewChallengeHandler(challengeSvc)
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
+	compH := handler.NewCompetitionHandler(compSvc)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -53,12 +55,24 @@ func main() {
 		r.Get("/challenges/{id}", challengeH.Get)
 		r.Post("/challenges/{id}/submit", submissionH.Submit)
 
+		r.Get("/competitions", compH.List)
+		r.Get("/competitions/{id}", compH.Get)
+		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
+		r.Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
+
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Post("/challenges", challengeH.Create)
 			r.Put("/challenges/{id}", challengeH.Update)
 			r.Delete("/challenges/{id}", challengeH.Delete)
 			r.Get("/submissions", submissionH.List)
+
+			r.Post("/competitions", compH.Create)
+			r.Get("/competitions", compH.ListAll)
+			r.Put("/competitions/{id}", compH.Update)
+			r.Delete("/competitions/{id}", compH.Delete)
+			r.Post("/competitions/{id}/challenges", compH.AddChallenge)
+			r.Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
 		})
 	})
 

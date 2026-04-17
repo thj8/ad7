@@ -24,7 +24,7 @@ func NewSubmissionService(c store.ChallengeStore, s store.SubmissionStore) *Subm
 	return &SubmissionService{challenges: c, submissions: s}
 }
 
-func (s *SubmissionService) Submit(ctx context.Context, userID string, challengeID int, flag string) (SubmitResult, error) {
+func (s *SubmissionService) Submit(ctx context.Context, userID string, challengeID int64, flag string) (SubmitResult, error) {
 	solved, err := s.submissions.HasCorrectSubmission(ctx, userID, challengeID)
 	if err != nil {
 		return "", err
@@ -57,6 +57,45 @@ func (s *SubmissionService) Submit(ctx context.Context, userID string, challenge
 	return ResultIncorrect, nil
 }
 
-func (s *SubmissionService) List(ctx context.Context, userID string, challengeID int) ([]model.Submission, error) {
+func (s *SubmissionService) List(ctx context.Context, userID string, challengeID int64) ([]model.Submission, error) {
 	return s.submissions.ListSubmissions(ctx, userID, challengeID)
+}
+
+func (s *SubmissionService) SubmitInComp(ctx context.Context, userID string, competitionID, challengeID int64, flag string) (SubmitResult, error) {
+	solved, err := s.submissions.HasCorrectSubmissionInComp(ctx, userID, challengeID, competitionID)
+	if err != nil {
+		return "", err
+	}
+	if solved {
+		return ResultAlreadySolved, nil
+	}
+
+	challenge, err := s.challenges.GetEnabledByID(ctx, challengeID)
+	if err != nil {
+		return "", err
+	}
+	if challenge == nil {
+		return "", ErrNotFound
+	}
+
+	isCorrect := challenge.Flag == flag
+	compID := competitionID
+	if err := s.submissions.CreateSubmissionWithComp(ctx, &model.Submission{
+		UserID:        userID,
+		ChallengeID:   challengeID,
+		CompetitionID: &compID,
+		SubmittedFlag: flag,
+		IsCorrect:     isCorrect,
+	}); err != nil {
+		return "", err
+	}
+
+	if isCorrect {
+		return ResultCorrect, nil
+	}
+	return ResultIncorrect, nil
+}
+
+func (s *SubmissionService) ListByComp(ctx context.Context, competitionID int64, userID string, challengeID int64) ([]model.Submission, error) {
+	return s.submissions.ListSubmissionsByComp(ctx, competitionID, userID, challengeID)
 }
