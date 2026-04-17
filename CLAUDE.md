@@ -11,6 +11,14 @@ go build ./...
 # Run server (from project root)
 go run ./cmd/server -config config.yaml
 
+# Seed test data (15 competitions, 50 challenges, 30 users each)
+go run ./cmd/seed/
+TEST_DSN="root:pass@tcp(host:3306)/ctf?parseTime=true" go run ./cmd/seed/
+
+# Demo script (query competitions, submit flags, check leaderboard)
+./scripts/demo.sh
+BASE_URL=http://host:8080 ./scripts/demo.sh
+
 # Run all tests
 go test ./...
 
@@ -29,6 +37,7 @@ mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 Layered Go service: **handler → service → store** + **plugin system**
 
 - `cmd/server/main.go` — wires everything: loads config, opens DB, creates store/services/handlers, registers chi routes, loads plugins, starts HTTP server
+- `cmd/seed/main.go` — populates DB with test data: 50 challenges, 15 competitions, 30 users per competition with differentiated solve rates (top user 72%)
 - `internal/config/` — YAML config loading (`server.port`, `db.*`, `jwt.secret`, `jwt.admin_role`)
 - `internal/model/` — domain structs: `Challenge`, `Submission`, `Notification`, `Competition`, `CompetitionChallenge`. `Flag` has `json:"-"` so it never appears in API responses. All entities use snowflake `res_id` (int64) as public ID.
 - `internal/store/` — `store.go` defines `ChallengeStore`, `SubmissionStore`, `CompetitionStore` interfaces; `mysql.go` implements all on a single `*Store` struct

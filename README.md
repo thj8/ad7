@@ -26,8 +26,14 @@ cp config.yaml.example config.yaml
 # Apply database schema
 mysql -u root -p your_db < sql/schema.sql
 
-# Run
+# Seed test data (optional)
+go run ./cmd/seed/
+
+# Run server
 go run ./cmd/server -config config.yaml
+
+# Try the demo script
+./scripts/demo.sh
 ```
 
 ## API Overview
@@ -97,7 +103,11 @@ All endpoints require a Bearer JWT token in the `Authorization` header. Admin en
 
 ```
 .
-├── cmd/server/           # Entry point
+├── cmd/
+│   ├── server/           # Entry point
+│   └── seed/             # Test data seeder
+├── scripts/
+│   └── demo.sh           # Demo: query competitions, submit flags, leaderboard
 ├── internal/
 │   ├── config/           # YAML config loading
 │   ├── handler/          # HTTP handlers
