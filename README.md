@@ -9,6 +9,7 @@ A multi-competition CTF (Capture The Flag) Jeopardy platform built with Go.
 - **In-competition flag submission** — Users submit flags within a competition context, with duplicate-solve prevention
 - **Per-competition leaderboard** — Ranked by total score descending, ties broken by earliest solve time
 - **Per-competition notifications** — Admin can post announcements scoped to a competition
+- **Competition analytics** — Detailed statistics including overview, category-wise, user-wise, and challenge-wise analytics
 - **Plugin system** — Extensible compile-time plugin interface for adding new features
 - **Snowflake IDs** — All public-facing IDs use snowflake algorithm for distributed-friendly unique identifiers
 - **JWT authentication** — Bearer token auth with admin role gating (user management handled externally)
@@ -91,6 +92,40 @@ All endpoints require a Bearer JWT token in the `Authorization` header. Admin en
 | GET | `/api/v1/competitions/{id}/leaderboard` | Competition leaderboard |
 | POST | `/api/v1/admin/competitions/{id}/notifications` | Create competition notification |
 | GET | `/api/v1/competitions/{id}/notifications` | List competition notifications |
+| GET | `/api/v1/competitions/{id}/analytics/overview` | Competition overview statistics |
+| GET | `/api/v1/competitions/{id}/analytics/categories` | Category-wise statistics |
+| GET | `/api/v1/competitions/{id}/analytics/users` | User performance statistics |
+| GET | `/api/v1/competitions/{id}/analytics/challenges` | Challenge difficulty statistics |
+
+### Competition Analytics
+
+The analytics plugin provides detailed statistics for competitions:
+
+**Overview (`/analytics/overview`)**
+- Total users, challenges, submissions
+- Correct submissions count
+- Average solves per user
+- Average solve time (from competition start)
+- Completion rate (average % of challenges solved)
+
+**By Category (`/analytics/categories`)**
+- Total challenges per category
+- Total solves per category
+- Unique users solved per category
+- Average solves per user
+- Success rate (correct / total submissions)
+
+**User Stats (`/analytics/users`)**
+- Total solves, total score, total attempts per user
+- Success rate per user
+- First and last solve time
+- Ordered by total score descending, first solve ascending
+
+**Challenge Stats (`/analytics/challenges`)**
+- Total solves, attempts, success rate per challenge
+- Unique users solved
+- First solve time
+- Average time to solve (from first submission to correct)
 
 ## Tech Stack
 
@@ -120,7 +155,8 @@ All endpoints require a Bearer JWT token in the `Authorization` header. Admin en
 │   └── integration/      # Integration tests
 ├── plugins/
 │   ├── leaderboard/      # Per-competition leaderboard
-│   └── notification/     # Per-competition notifications
+│   ├── notification/     # Per-competition notifications
+│   └── analytics/        # Competition analytics (overview, categories, users, challenges)
 ├── sql/schema.sql        # Database schema
 └── config.yaml           # Configuration
 ```
