@@ -1,0 +1,278 @@
+openapi: 3.0.3
+info:
+  title: CTF 解题赛系统 API
+  version: 1.0.0
+  description: Jeopardy CTF 平台后端 API — 题目管理 + flag 提交验证
+
+servers:
+  - url: http://localhost:8080
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 中台下发的 JWT Token，claims 包含 sub(user_id) 和 role
+
+  schemas:
+    Challenge:
+      type: object
+      properties:
+        id:          { type: integer }
+        title:       { type: string }
+        category:    { type: string }
+        description: { type: string }
+        score:       { type: integer }
+        is_enabled:  { type: boolean }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    Submission:
+      type: object
+      properties:
+        id:             { type: integer }
+        user_id:        { type: string }
+        challenge_id:   { type: integer }
+        submitted_flag: { type: string }
+        is_correct:     { type: boolean }
+        created_at:     { type: string, format: date-time }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+security:
+  - BearerAuth: []
+
+paths:
+  /api/v1/challenges:
+    get:
+      summary: 获取题目列表
+      description: 返回所有已启用的题目，不含 flag 字段
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Challenge'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/challenges/{id}:
+    get:
+      summary: 获取单个题目
+      description: 返回指定已启用题目的详情，不含 flag 字段
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Challenge' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 题目不存在或未启用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/challenges/{id}/submit:
+    post:
+      summary: 提交 flag
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flag]
+              properties:
+                flag: { type: string, example: "flag{hello_world}" }
+      responses:
+        '200':
+          description: 提交结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message:
+                    type: string
+                    enum: [correct, incorrect, already_solved]
+        '400':
+          description: 缺少 flag 字段
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 题目不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/challenges:
+    post:
+      summary: 创建题目
+      description: 需要 JWT 中 role == "admin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, flag]
+              properties:
+                title:       { type: string }
+                category:    { type: string, default: misc }
+                description: { type: string }
+                score:       { type: integer, default: 100 }
+                flag:        { type: string }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/challenges/{id}:
+    put:
+      summary: 更新题目
+      description: 需要 JWT 中 role == "admin"，只更新传入的非零字段
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:       { type: string }
+                category:    { type: string }
+                description: { type: string }
+                score:       { type: integer }
+                flag:        { type: string }
+                is_enabled:  { type: boolean }
+      responses:
+        '204': { description: 更新成功 }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 题目不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      summary: 删除题目
+      description: 需要 JWT 中 role == "admin"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: 删除成功 }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/submissions:
+    get:
+      summary: 查看提交记录
+      description: 需要 JWT 中 role == "admin"，支持按 user_id 和 challenge_id 过滤
+      parameters:
+        - name: user_id
+          in: query
+          schema: { type: string }
+        - name: challenge_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  submissions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Submission'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
