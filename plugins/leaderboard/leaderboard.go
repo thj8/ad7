@@ -50,6 +50,10 @@ type entry struct {
 // 返回每个用户的排名、总分、最后解题时间，以及每道题的解题状态和一二三血信息。
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
+		return
+	}
 	ctx := r.Context()
 
 	// 1. 获取比赛所有题目 ID（通过共享查询函数获取完整信息，再提取 ID）
@@ -64,7 +68,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 查询所有正确提交
-	solves, err := pluginutil.GetFirstCorrectSubmissions(ctx, p.db, compID)
+	solves, err := pluginutil.GetCorrectSubmissions(ctx, p.db, compID)
 	if err != nil {
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return

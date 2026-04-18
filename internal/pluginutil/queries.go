@@ -56,9 +56,9 @@ func GetCompChallenges(ctx context.Context, db DBTX, compID string) ([]Challenge
 	return challenges, rows.Err()
 }
 
-// GetFirstCorrectSubmissions 获取比赛中每用户每题的最早正确提交。
-// 返回去重后的解题记录（每个用户对每道题只有一条，取最早的提交时间）。
-func GetFirstCorrectSubmissions(ctx context.Context, db DBTX, compID string) ([]FirstSolve, error) {
+// GetCorrectSubmissions 获取比赛中每用户每题的正确提交。
+// 每个用户对每道题最多一条记录（通过 GROUP BY 去重）。
+func GetCorrectSubmissions(ctx context.Context, db DBTX, compID string) ([]FirstSolve, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT s.user_id, s.challenge_id, MIN(s.created_at)
 		FROM submissions s

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     is_deleted     TINYINT(1)   NOT NULL DEFAULT 0,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_user_challenge (user_id, challenge_id)
+    INDEX idx_user_challenge (user_id, challenge_id),
+    UNIQUE INDEX idx_user_chal_comp_correct (user_id, challenge_id, competition_id, is_correct)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (

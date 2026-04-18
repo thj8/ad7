@@ -40,6 +40,10 @@ type createReq struct {
 // listByComp 处理获取比赛通知列表的请求。
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
+		return
+	}
 	rows, err := p.db.QueryContext(r.Context(), `
 		SELECT res_id, competition_id, title, message, created_at
 		FROM notifications
@@ -69,6 +73,10 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 // createForComp 处理创建比赛通知的请求（管理员）。
 func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
+		return
+	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Message == "" {
 		pluginutil.WriteError(w, http.StatusBadRequest, "title and message are required")
