@@ -24,7 +24,7 @@ func (s *CompetitionService) ListActive(ctx context.Context) ([]model.Competitio
 	return s.store.ListActiveCompetitions(ctx)
 }
 
-func (s *CompetitionService) Get(ctx context.Context, resID int64) (*model.Competition, error) {
+func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Competition, error) {
 	c, err := s.store.GetCompetitionByID(ctx, resID)
 	if err != nil {
 		return nil, err
@@ -35,18 +35,18 @@ func (s *CompetitionService) Get(ctx context.Context, resID int64) (*model.Compe
 	return c, nil
 }
 
-func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (int64, error) {
+func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (string, error) {
 	if c.Title == "" {
-		return 0, errors.New("title is required")
+		return "", errors.New("title is required")
 	}
 	if c.EndTime.Before(c.StartTime) {
-		return 0, errors.New("end_time must be after start_time")
+		return "", errors.New("end_time must be after start_time")
 	}
 	c.IsActive = true
 	return s.store.CreateCompetition(ctx, c)
 }
 
-func (s *CompetitionService) Update(ctx context.Context, resID int64, patch *model.Competition) error {
+func (s *CompetitionService) Update(ctx context.Context, resID string, patch *model.Competition) error {
 	existing, err := s.store.GetCompetitionByID(ctx, resID)
 	if err != nil {
 		return err
@@ -73,18 +73,18 @@ func (s *CompetitionService) Update(ctx context.Context, resID int64, patch *mod
 	return s.store.UpdateCompetition(ctx, existing)
 }
 
-func (s *CompetitionService) Delete(ctx context.Context, resID int64) error {
+func (s *CompetitionService) Delete(ctx context.Context, resID string) error {
 	return s.store.DeleteCompetition(ctx, resID)
 }
 
-func (s *CompetitionService) AddChallenge(ctx context.Context, compID, chalID int64) error {
+func (s *CompetitionService) AddChallenge(ctx context.Context, compID, chalID string) error {
 	return s.store.AddChallenge(ctx, compID, chalID)
 }
 
-func (s *CompetitionService) RemoveChallenge(ctx context.Context, compID, chalID int64) error {
+func (s *CompetitionService) RemoveChallenge(ctx context.Context, compID, chalID string) error {
 	return s.store.RemoveChallenge(ctx, compID, chalID)
 }
 
-func (s *CompetitionService) ListChallenges(ctx context.Context, compID int64) ([]model.Challenge, error) {
+func (s *CompetitionService) ListChallenges(ctx context.Context, compID string) ([]model.Challenge, error) {
 	return s.store.ListCompChallenges(ctx, compID)
 }

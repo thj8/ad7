@@ -198,7 +198,7 @@ func main() {
 		picked := pickN(rng, chalIDs, chalsPerComp)
 		assignChals(db, compID, picked)
 		genSubmissions(db, rng, compID, picked, start, end)
-		log.Printf("competition %02d  id=%-18d  %s ~ %s  done", i+1, compID,
+		log.Printf("competition %02d  id=%s  %s ~ %s  done", i+1, compID,
 			start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04"))
 	}
 
@@ -216,8 +216,8 @@ func cleanAll(db *sql.DB) {
 	}
 }
 
-func createChallenges(db *sql.DB) []int64 {
-	ids := make([]int64, poolSize)
+func createChallenges(db *sql.DB) []string {
+	ids := make([]string, poolSize)
 	cnCount := 0 // Track Chinese challenges (limit to ~3)
 	for i := range ids {
 		rid := snowflake.Next()
@@ -254,7 +254,7 @@ func createChallenges(db *sql.DB) []int64 {
 	return ids
 }
 
-func createComp(db *sql.DB, idx int, now time.Time) (int64, time.Time, time.Time) {
+func createComp(db *sql.DB, idx int, now time.Time) (string, time.Time, time.Time) {
 	rid := snowflake.Next()
 
 	var start, end time.Time
@@ -282,14 +282,14 @@ func createComp(db *sql.DB, idx int, now time.Time) (int64, time.Time, time.Time
 	return rid, start, end
 }
 
-func pickN(rng *rand.Rand, ids []int64, n int) []int64 {
-	s := make([]int64, len(ids))
+func pickN(rng *rand.Rand, ids []string, n int) []string {
+	s := make([]string, len(ids))
 	copy(s, ids)
 	rng.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] })
 	return s[:n]
 }
 
-func assignChals(db *sql.DB, compID int64, chalIDs []int64) {
+func assignChals(db *sql.DB, compID string, chalIDs []string) {
 	for _, cid := range chalIDs {
 		rid := snowflake.Next()
 		_, err := db.Exec(`INSERT INTO competition_challenges
@@ -299,7 +299,7 @@ func assignChals(db *sql.DB, compID int64, chalIDs []int64) {
 	}
 }
 
-func genSubmissions(db *sql.DB, rng *rand.Rand, compID int64, chalIDs []int64, compStart, compEnd time.Time) {
+func genSubmissions(db *sql.DB, rng *rand.Rand, compID string, chalIDs []string, compStart, compEnd time.Time) {
 	dur := compEnd.Sub(compStart)
 
 	for u := 0; u < usersPerComp; u++ {
@@ -307,7 +307,7 @@ func genSubmissions(db *sql.DB, rng *rand.Rand, compID int64, chalIDs []int64, c
 		nCorrect := solveCounts[u]
 
 		// Pick which challenges this user solves.
-		picked := make([]int64, len(chalIDs))
+		picked := make([]string, len(chalIDs))
 		copy(picked, chalIDs)
 		rng.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
 
@@ -335,7 +335,7 @@ func genSubmissions(db *sql.DB, rng *rand.Rand, compID int64, chalIDs []int64, c
 	}
 }
 
-func insertSub(db *sql.DB, userID string, chalID, compID int64, correct bool, t time.Time) {
+func insertSub(db *sql.DB, userID string, chalID, compID string, correct bool, t time.Time) {
 	flag := "flag{wrong_attempt}"
 	if correct {
 		flag = "flag{correct}"

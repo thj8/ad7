@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -29,7 +28,7 @@ type createReq struct {
 }
 
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
-	compID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	compID := chi.URLParam(r, "id")
 	rows, err := p.db.QueryContext(r.Context(), `
 		SELECT res_id, competition_id, title, message, created_at
 		FROM notifications
@@ -58,7 +57,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
-	compID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	compID := chi.URLParam(r, "id")
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Message == "" {
 		http.Error(w, `{"error":"title and message are required"}`, http.StatusBadRequest)

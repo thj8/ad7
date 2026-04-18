@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -196,9 +195,9 @@ func (h *CompetitionHandler) AddChallenge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var body struct {
-		ChallengeID int64 `json:"challenge_id"`
+		ChallengeID string `json:"challenge_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ChallengeID == 0 {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ChallengeID == "" {
 		writeError(w, http.StatusBadRequest, "challenge_id is required")
 		return
 	}
@@ -215,8 +214,8 @@ func (h *CompetitionHandler) RemoveChallenge(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	chalID, err := strconv.ParseInt(chi.URLParam(r, "challenge_id"), 10, 64)
-	if err != nil || chalID <= 0 {
+	chalID := chi.URLParam(r, "challenge_id")
+	if chalID == "" {
 		writeError(w, http.StatusBadRequest, "invalid challenge_id")
 		return
 	}

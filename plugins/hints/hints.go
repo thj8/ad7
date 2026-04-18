@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,7 +17,7 @@ type Plugin struct{ db *sql.DB }
 func New() *Plugin { return &Plugin{} }
 
 type hint struct {
-	ResID     int64     `json:"id"`
+	ResID     string    `json:"id"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -41,8 +40,8 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 }
 
 func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
-	chalID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	chalID := chi.URLParam(r, "id")
+	if len(chalID) != 32 {
 		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
 		return
 	}
@@ -53,7 +52,7 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = p.db.ExecContext(r.Context(),
+	_, err := p.db.ExecContext(r.Context(),
 		`INSERT INTO hints (res_id, challenge_id, content) VALUES (?, ?, ?)`,
 		snowflake.Next(), chalID, req.Content)
 	if err != nil {
@@ -65,8 +64,8 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
-	hintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	hintID := chi.URLParam(r, "id")
+	if len(hintID) != 32 {
 		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
 		return
 	}
@@ -86,7 +85,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 	// Get current values first
 	var currentContent string
 	var currentIsVisible bool
-	err = p.db.QueryRowContext(r.Context(),
+	err := p.db.QueryRowContext(r.Context(),
 		`SELECT content, is_visible FROM hints WHERE res_id = ?`, hintID).
 		Scan(&currentContent, &currentIsVisible)
 	if err == sql.ErrNoRows {
@@ -121,8 +120,8 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
-	hintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	hintID := chi.URLParam(r, "id")
+	if len(hintID) != 32 {
 		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
 		return
 	}
@@ -148,8 +147,8 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
-	chalID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	chalID := chi.URLParam(r, "id")
+	if len(chalID) != 32 {
 		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
 		return
 	}

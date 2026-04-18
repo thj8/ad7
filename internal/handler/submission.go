@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -20,7 +19,7 @@ func NewSubmissionHandler(svc *service.SubmissionService) *SubmissionHandler {
 }
 
 func (h *SubmissionHandler) Submit(w http.ResponseWriter, r *http.Request) {
-	challengeID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	challengeID := chi.URLParam(r, "id")
 	var body struct {
 		Flag string `json:"flag"`
 	}
@@ -45,8 +44,8 @@ func (h *SubmissionHandler) Submit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request) {
-	compID, _ := strconv.ParseInt(chi.URLParam(r, "comp_id"), 10, 64)
-	chalID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	compID := chi.URLParam(r, "comp_id")
+	chalID := chi.URLParam(r, "id")
 	var body struct {
 		Flag string `json:"flag"`
 	}
@@ -72,7 +71,7 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 
 func (h *SubmissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
-	challengeID, _ := strconv.ParseInt(r.URL.Query().Get("challenge_id"), 10, 64)
+	challengeID := r.URL.Query().Get("challenge_id")
 	subs, err := h.svc.List(r.Context(), userID, challengeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -5,16 +5,16 @@ import "time"
 type recentEvent struct {
 	Type           string    `json:"type"`
 	UserID         string    `json:"user_id"`
-	ChallengeID    int64     `json:"challenge_id"`
+	ChallengeID    string    `json:"challenge_id"`
 	ChallengeTitle string    `json:"challenge_title"`
 	Score          int       `json:"score,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
 type firstBlood struct {
-	ResID         int64     `json:"-"`
-	CompetitionID int64     `json:"-"`
-	ChallengeID   int64     `json:"challenge_id"`
+	ResID         string    `json:"-"`
+	CompetitionID string    `json:"-"`
+	ChallengeID   string    `json:"challenge_id"`
 	ChallengeTitle string   `json:"challenge_title"`
 	Category      string    `json:"category"`
 	Score         int       `json:"score"`
@@ -23,7 +23,7 @@ type firstBlood struct {
 }
 
 type competitionInfo struct {
-	ID        int64     `json:"id"`
+	ID        string    `json:"id"`
 	Title     string    `json:"title"`
 	IsActive  bool      `json:"is_active"`
 	StartTime time.Time `json:"start_time"`
@@ -31,7 +31,7 @@ type competitionInfo struct {
 }
 
 type challengeState struct {
-	ID         int64           `json:"id"`
+	ID         string          `json:"id"`
 	Title      string          `json:"title"`
 	Category   string          `json:"category"`
 	Score      int             `json:"score"`

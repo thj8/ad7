@@ -48,8 +48,8 @@ type categoryResponse struct {
 }
 
 func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
@@ -58,7 +58,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	var resp overviewResponse
 
 	// Get total challenges in competition
-	err = p.db.QueryRowContext(ctx, `
+	err := p.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ?
 	`, compID).Scan(&resp.TotalChallenges)
 	if err != nil {
@@ -91,7 +91,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM submissions
 			WHERE competition_id = ? AND is_correct = 1
-		`, compID).Scan(&totalCorrectSolves)
+			`, compID).Scan(&totalCorrectSolves)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 			return
@@ -128,8 +128,8 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
@@ -166,7 +166,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
 			WHERE s.competition_id = ? AND cc.competition_id = ?
 			AND s.is_correct = 1 AND c.category = ?
-		`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
+			`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 			return
@@ -176,7 +176,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		var totalUsers int
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ?
-		`, compID).Scan(&totalUsers)
+			`, compID).Scan(&totalUsers)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 			return
@@ -195,7 +195,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
 			WHERE s.competition_id = ? AND cc.competition_id = ?
 			AND c.category = ?
-		`, compID, compID, cat.Category).Scan(&totalAttempts)
+			`, compID, compID, cat.Category).Scan(&totalAttempts)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 			return
@@ -231,8 +231,8 @@ type userStatsResponse struct {
 }
 
 func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
@@ -252,7 +252,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		WHERE s.competition_id = ?
 		GROUP BY s.user_id
 		ORDER BY total_score DESC, first_solve ASC
-	`, compID)
+		`, compID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
@@ -298,7 +298,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 }
 
 type challengeStats struct {
-	ChallengeID       int64   `json:"challenge_id"`
+	ChallengeID       string  `json:"challenge_id"`
 	Title             string  `json:"title"`
 	Category          string  `json:"category"`
 	Score             int     `json:"score"`
@@ -315,8 +315,8 @@ type challengeStatsResponse struct {
 }
 
 func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
@@ -329,7 +329,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 		FROM competition_challenges cc
 		JOIN challenges c ON c.res_id = cc.challenge_id
 		WHERE cc.competition_id = ?
-	`, compID)
+		`, compID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
@@ -354,7 +354,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 				MIN(CASE WHEN is_correct = 1 THEN created_at ELSE NULL END)
 			FROM submissions
 			WHERE competition_id = ? AND challenge_id = ?
-		`, compID, cs.ChallengeID).Scan(
+			`, compID, cs.ChallengeID).Scan(
 			&cs.TotalSolves,
 			&cs.TotalAttempts,
 			&cs.UniqueUsersSolved,
@@ -387,7 +387,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 				GROUP BY user_id
 				HAVING correct_submit IS NOT NULL
 			) user_times
-		`, compID, cs.ChallengeID).Scan(&avgSolveTime)
+			`, compID, cs.ChallengeID).Scan(&avgSolveTime)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 			return

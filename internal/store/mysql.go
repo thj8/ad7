@@ -48,7 +48,7 @@ func (s *Store) ListEnabled(ctx context.Context) ([]model.Challenge, error) {
 	return cs, rows.Err()
 }
 
-func (s *Store) GetEnabledByID(ctx context.Context, resID int64) (*model.Challenge, error) {
+func (s *Store) GetEnabledByID(ctx context.Context, resID string) (*model.Challenge, error) {
 	var c model.Challenge
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, category, description, score, flag, is_enabled, created_at, updated_at
@@ -61,7 +61,7 @@ func (s *Store) GetEnabledByID(ctx context.Context, resID int64) (*model.Challen
 	return &c, err
 }
 
-func (s *Store) GetByID(ctx context.Context, resID int64) (*model.Challenge, error) {
+func (s *Store) GetByID(ctx context.Context, resID string) (*model.Challenge, error) {
 	var c model.Challenge
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, category, description, score, flag, is_enabled, created_at, updated_at
@@ -74,14 +74,14 @@ func (s *Store) GetByID(ctx context.Context, resID int64) (*model.Challenge, err
 	return &c, err
 }
 
-func (s *Store) Create(ctx context.Context, c *model.Challenge) (int64, error) {
+func (s *Store) Create(ctx context.Context, c *model.Challenge) (string, error) {
 	c.ResID = snowflake.Next()
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO challenges (res_id, title, category, description, score, flag, is_enabled)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		c.ResID, c.Title, c.Category, c.Description, c.Score, c.Flag, c.IsEnabled)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return c.ResID, nil
 }
@@ -93,12 +93,12 @@ func (s *Store) Update(ctx context.Context, c *model.Challenge) error {
 	return err
 }
 
-func (s *Store) Delete(ctx context.Context, resID int64) error {
+func (s *Store) Delete(ctx context.Context, resID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE challenges SET is_deleted=1 WHERE res_id = ?`, resID)
 	return err
 }
 
-func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID int64) (bool, error) {
+func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1`,
@@ -114,14 +114,14 @@ func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) err
 	return err
 }
 
-func (s *Store) ListSubmissions(ctx context.Context, userID string, challengeID int64) ([]model.Submission, error) {
+func (s *Store) ListSubmissions(ctx context.Context, userID string, challengeID string) ([]model.Submission, error) {
 	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE 1=1`
 	args := []any{}
 	if userID != "" {
 		query += " AND user_id=?"
 		args = append(args, userID)
 	}
-	if challengeID > 0 {
+	if challengeID != "" {
 		query += " AND challenge_id=?"
 		args = append(args, challengeID)
 	}
@@ -183,7 +183,7 @@ func (s *Store) ListActiveCompetitions(ctx context.Context) ([]model.Competition
 	return cs, rows.Err()
 }
 
-func (s *Store) GetCompetitionByID(ctx context.Context, resID int64) (*model.Competition, error) {
+func (s *Store) GetCompetitionByID(ctx context.Context, resID string) (*model.Competition, error) {
 	var c model.Competition
 	err := s.db.QueryRowContext(ctx,
 		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
@@ -195,13 +195,13 @@ func (s *Store) GetCompetitionByID(ctx context.Context, resID int64) (*model.Com
 	return &c, err
 }
 
-func (s *Store) CreateCompetition(ctx context.Context, c *model.Competition) (int64, error) {
+func (s *Store) CreateCompetition(ctx context.Context, c *model.Competition) (string, error) {
 	c.ResID = snowflake.Next()
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO competitions (res_id, title, description, start_time, end_time, is_active) VALUES (?, ?, ?, ?, ?, ?)`,
 		c.ResID, c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return c.ResID, nil
 }
@@ -213,27 +213,27 @@ func (s *Store) UpdateCompetition(ctx context.Context, c *model.Competition) err
 	return err
 }
 
-func (s *Store) DeleteCompetition(ctx context.Context, resID int64) error {
+func (s *Store) DeleteCompetition(ctx context.Context, resID string) error {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM competition_challenges WHERE competition_id = ?`, resID)
 	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ?`, resID)
 	return err
 }
 
-func (s *Store) AddChallenge(ctx context.Context, compID, chalID int64) error {
+func (s *Store) AddChallenge(ctx context.Context, compID, chalID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO competition_challenges (res_id, competition_id, challenge_id) VALUES (?, ?, ?)`,
 		snowflake.Next(), compID, chalID)
 	return err
 }
 
-func (s *Store) RemoveChallenge(ctx context.Context, compID, chalID int64) error {
+func (s *Store) RemoveChallenge(ctx context.Context, compID, chalID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM competition_challenges WHERE competition_id = ? AND challenge_id = ?`,
 		compID, chalID)
 	return err
 }
 
-func (s *Store) ListCompChallenges(ctx context.Context, compID int64) ([]model.Challenge, error) {
+func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.Challenge, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT c.res_id, c.title, c.category, c.description, c.score, c.is_enabled, c.created_at, c.updated_at
 		 FROM challenges c
@@ -256,7 +256,7 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID int64) ([]model.C
 
 // --- Extended SubmissionStore methods ---
 
-func (s *Store) HasCorrectSubmissionInComp(ctx context.Context, userID string, challengeID, competitionID int64) (bool, error) {
+func (s *Store) HasCorrectSubmissionInComp(ctx context.Context, userID string, challengeID, competitionID string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1`,
@@ -272,14 +272,14 @@ func (s *Store) CreateSubmissionWithComp(ctx context.Context, sub *model.Submiss
 	return err
 }
 
-func (s *Store) ListSubmissionsByComp(ctx context.Context, competitionID int64, userID string, challengeID int64) ([]model.Submission, error) {
+func (s *Store) ListSubmissionsByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
 	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE competition_id=?`
 	args := []any{competitionID}
 	if userID != "" {
 		query += " AND user_id=?"
 		args = append(args, userID)
 	}
-	if challengeID > 0 {
+	if challengeID != "" {
 		query += " AND challenge_id=?"
 		args = append(args, challengeID)
 	}
@@ -292,7 +292,8 @@ func (s *Store) ListSubmissionsByComp(ctx context.Context, competitionID int64, 
 	var subs []model.Submission
 	for rows.Next() {
 		var sub model.Submission
-		if err := rows.Scan(&sub.ResID, &sub.UserID, &sub.ChallengeID, &sub.CompetitionID, &sub.SubmittedFlag, &sub.IsCorrect, &sub.CreatedAt); err != nil {
+		if err := rows.Scan(&sub.ResID, &sub.UserID, &sub.ChallengeID, &sub.CompetitionID,
+			&sub.SubmittedFlag, &sub.IsCorrect, &sub.CreatedAt); err != nil {
 			return nil, err
 		}
 		subs = append(subs, sub)

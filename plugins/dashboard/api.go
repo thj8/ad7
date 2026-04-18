@@ -3,14 +3,13 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
 
 func (p *Plugin) getState(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
@@ -26,8 +25,8 @@ func (p *Plugin) getState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) getFirstBlood(w http.ResponseWriter, r *http.Request) {
-	compID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
 	}
