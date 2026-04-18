@@ -42,10 +42,10 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 	for i := range challenges {
 		chal := &challenges[i]
 		rows, err := p.db.QueryContext(ctx, `
-			SELECT user_id, rank, created_at
+			SELECT user_id, ranking, created_at
 			FROM topthree_records
-			WHERE competition_id = ? AND challenge_id = ?
-			ORDER BY rank ASC
+			WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
+			ORDER BY ranking ASC
 		`, compID, chal.ChallengeID)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)

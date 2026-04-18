@@ -956,3 +956,156 @@ func TestTopThree(t *testing.T) {
 		t.Fatalf("expected <= 3 entries, got %d", len(chal1.TopThree))
 	}
 }
+
+func TestTopThreeBaseModelSoftDelete(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+
+	// Create competition
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"SoftDelete Comp","description":"Test","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// Create challenge
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"SD Chal","category":"web","description":"desc","score":100,"flag":"flag{sd}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	// Add challenge to competition
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// 3 users solve the challenge
+	u1 := makeToken("sduser1", "user")
+	u2 := makeToken("sduser2", "user")
+	u3 := makeToken("sduser3", "user")
+
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
+		`{"flag":"flag{sd}"}`, u1).Body.Close()
+	time.Sleep(10 * time.Millisecond)
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
+		`{"flag":"flag{sd}"}`, u2).Body.Close()
+	time.Sleep(10 * time.Millisecond)
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
+		`{"flag":"flag{sd}"}`, u3).Body.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify: topthree_records table has BaseModel fields populated
+	rows, err := testDB.Query(`
+		SELECT id, res_id, created_at, updated_at, is_deleted
+		FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
+		ORDER BY ranking ASC
+	`, compID, chalID)
+	if err != nil {
+		t.Fatalf("query topthree: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id int
+		var resID string
+		var createdAt, updatedAt time.Time
+		var isDeleted bool
+		if err := rows.Scan(&id, &resID, &createdAt, &updatedAt, &isDeleted); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if id <= 0 {
+			t.Error("expected positive auto-increment id")
+		}
+		if len(resID) != 32 {
+			t.Errorf("expected 32-char res_id, got %d chars: %s", len(resID), resID)
+		}
+		if createdAt.IsZero() {
+			t.Error("expected non-zero created_at")
+		}
+		if updatedAt.IsZero() {
+			t.Error("expected non-zero updated_at")
+		}
+		if isDeleted {
+			t.Error("expected is_deleted=false for active records")
+		}
+		count++
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 active records, got %d", count)
+	}
+
+	// Simulate being pushed out of top three via soft delete (same logic as updateTopThree)
+	// Soft-delete the rank 3 record (set ranking=0 to release unique index)
+	_, err = testDB.Exec(`
+		UPDATE topthree_records SET is_deleted = 1, ranking = 0, updated_at = NOW()
+		WHERE competition_id = ? AND challenge_id = ? AND ranking = 3 AND is_deleted = 0
+	`, compID, chalID)
+	if err != nil {
+		t.Fatalf("soft delete rank 3: %v", err)
+	}
+	// Shift rankings: rank 2 -> rank 3
+	_, err = testDB.Exec(`
+		UPDATE topthree_records SET ranking = 3, updated_at = NOW()
+		WHERE competition_id = ? AND challenge_id = ? AND ranking = 2 AND is_deleted = 0
+	`, compID, chalID)
+	if err != nil {
+		t.Fatalf("shift rank 2->3: %v", err)
+	}
+	// Shift rankings: rank 1 -> rank 2
+	_, err = testDB.Exec(`
+		UPDATE topthree_records SET ranking = 2, updated_at = NOW()
+		WHERE competition_id = ? AND challenge_id = ? AND ranking = 1 AND is_deleted = 0
+	`, compID, chalID)
+	if err != nil {
+		t.Fatalf("shift rank 1->2: %v", err)
+	}
+	// Insert new rank 1
+	resID := fmt.Sprintf("%032d", time.Now().UnixNano()%100000)
+	_, err = testDB.Exec(`
+		INSERT INTO topthree_records (res_id, competition_id, challenge_id, user_id, ranking, created_at)
+		VALUES (?, ?, ?, ?, 1, NOW())
+	`, resID, compID, chalID, "sduser4_faster")
+	if err != nil {
+		t.Fatalf("insert new rank 1: %v", err)
+	}
+
+	// Verify: only 3 active records remain (soft-deleted ones are excluded)
+	rows2, err := testDB.Query(`
+		SELECT user_id, ranking FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
+		ORDER BY ranking ASC
+	`, compID, chalID)
+	if err != nil {
+		t.Fatalf("query topthree after push: %v", err)
+	}
+	defer rows2.Close()
+
+	var activeUsers []string
+	for rows2.Next() {
+		var uid string
+		var rank int
+		if err := rows2.Scan(&uid, &rank); err != nil {
+			t.Fatalf("scan2: %v", err)
+		}
+		activeUsers = append(activeUsers, uid)
+	}
+	if len(activeUsers) != 3 {
+		t.Fatalf("expected 3 active users after push, got %d: %v", len(activeUsers), activeUsers)
+	}
+
+	// Verify: there is exactly 1 soft-deleted record
+	var softDeletedCount int
+	err = testDB.QueryRow(`
+		SELECT COUNT(*) FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 1
+	`, compID, chalID).Scan(&softDeletedCount)
+	if err != nil {
+		t.Fatalf("count soft-deleted: %v", err)
+	}
+	if softDeletedCount != 1 {
+		t.Errorf("expected 1 soft-deleted record, got %d", softDeletedCount)
+	}
+}

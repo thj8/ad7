@@ -33,10 +33,10 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 
 func (p *Plugin) getCurrentTopThree(ctx context.Context, compID, chalID string) ([]topThreeRecord, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, res_id, competition_id, challenge_id, user_id, rank, created_at
+		SELECT id, res_id, competition_id, challenge_id, user_id, ranking, created_at, updated_at, is_deleted
 		FROM topthree_records
-		WHERE competition_id = ? AND challenge_id = ?
-		ORDER BY rank ASC
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
+		ORDER BY ranking ASC
 	`, compID, chalID)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (p *Plugin) getCurrentTopThree(ctx context.Context, compID, chalID string) 
 	var records []topThreeRecord
 	for rows.Next() {
 		var r topThreeRecord
-		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &r.Rank, &r.CreatedAt)
+		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &r.Rank, &r.CreatedAt, &r.UpdatedAt, &r.IsDeleted)
 		if err != nil {
 			return nil, err
 		}
@@ -88,8 +88,9 @@ func (p *Plugin) updateTopThree(ctx context.Context, compID, chalID, userID stri
 	if newRank <= len(current) {
 		if newRank <= 2 && len(current) >= 3 {
 			_, err := tx.ExecContext(ctx, `
-				DELETE FROM topthree_records
-				WHERE competition_id = ? AND challenge_id = ? AND rank = 3
+				UPDATE topthree_records
+				SET is_deleted = 1, ranking = 0, updated_at = NOW()
+				WHERE competition_id = ? AND challenge_id = ? AND ranking = 3 AND is_deleted = 0
 			`, compID, chalID)
 			if err != nil {
 				return err
@@ -102,8 +103,8 @@ func (p *Plugin) updateTopThree(ctx context.Context, compID, chalID, userID stri
 			}
 			_, err := tx.ExecContext(ctx, `
 				UPDATE topthree_records
-				SET rank = ?
-				WHERE competition_id = ? AND challenge_id = ? AND rank = ?
+				SET ranking = ?
+				WHERE competition_id = ? AND challenge_id = ? AND ranking = ?
 			`, i+1, compID, chalID, i)
 			if err != nil {
 				return err
@@ -114,7 +115,7 @@ func (p *Plugin) updateTopThree(ctx context.Context, compID, chalID, userID stri
 	resID := snowflake.Next()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO topthree_records
-		(res_id, competition_id, challenge_id, user_id, rank, created_at)
+		(res_id, competition_id, challenge_id, user_id, ranking, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, resID, compID, chalID, userID, newRank, submitTime)
 	if err != nil {
