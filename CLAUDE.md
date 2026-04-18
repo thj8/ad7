@@ -39,19 +39,22 @@ Layered Go service: **handler → service → store** + **plugin system**
 - `cmd/server/main.go` — wires everything: loads config, opens DB, creates store/services/handlers, registers chi routes, loads plugins, starts HTTP server
 - `cmd/seed/main.go` — populates DB with test data: 50 challenges, 15 competitions, 30 users per competition with differentiated solve rates (top user 72%)
 - `internal/config/` — YAML config loading (`server.port`, `db.*`, `jwt.secret`, `jwt.admin_role`)
-- `internal/model/` — domain structs: `Challenge`, `Submission`, `Notification`, `Competition`, `CompetitionChallenge`. `Flag` has `json:"-"` so it never appears in API responses. All entities use snowflake `res_id` (int64) as public ID.
+- `internal/model/` — domain structs: `Challenge`, `Submission`, `Notification`, `Competition`, `CompetitionChallenge`. `Flag` has `json:"-"` so it never appears in API responses. All entities use UUID `res_id` (32-character hex string, no hyphens) as public ID.
 - `internal/store/` — `store.go` defines `ChallengeStore`, `SubmissionStore`, `CompetitionStore` interfaces; `mysql.go` implements all on a single `*Store` struct
 - `internal/service/` — business logic: `ChallengeService` (CRUD), `SubmissionService` (flag verification, in-competition submission), `CompetitionService` (competition CRUD, challenge assignment)
 - `internal/handler/` — HTTP layer only; uses separate request structs to receive fields that have `json:"-"` on models
 - `internal/middleware/` — JWT auth (`Authenticate`) and admin gate (`RequireAdmin`); extracts `sub`→`user_id` and `role` from claims into context
 - `internal/plugin/` — `Plugin` interface: `Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`
-- `internal/snowflake/` — snowflake ID generator (41-bit timestamp + 10-bit machine + 12-bit sequence)
+- `internal/snowflake/` — UUID v4 generator (32-character hex string without hyphens)
 - `plugins/leaderboard/` — per-competition leaderboard, ranked by total score desc, ties by earliest solve time asc
 - `plugins/notification/` — per-competition notifications, admin creates, all users can list
+- `plugins/hints/` — challenge hints system, admin manages, users list visible hints
+- `plugins/dashboard/` — competition dashboard with first blood tracking
+- `plugins/analytics/` — competition analytics (overview, categories, users, challenges)
 
 ## Key Design Decisions
 
-**Snowflake res_id**: All entities use `res_id BIGINT` (snowflake) as the public-facing ID. The auto-increment `id` column is internal only (`json:"-"`). API paths and responses use `res_id` exclusively.
+**UUID res_id**: All entities use `res_id VARCHAR(32)` (UUID v4, 32-character hex string without hyphens) as the public-facing ID. The auto-increment `id` column is internal only (`json:"-"`). API paths and responses use `res_id` exclusively.
 
 **Flag field**: `model.Challenge.Flag` is `json:"-"`. Handlers use separate request structs (`createRequest`, `updateRequest`) to decode the flag from incoming JSON, then manually assign it to the model before passing to the service.
 
@@ -69,7 +72,7 @@ Layered Go service: **handler → service → store** + **plugin system**
 
 ## Integration Tests
 
-Tests in `internal/integration/` connect to a real MySQL instance. 12 tests covering:
+Tests in `internal/integration/` connect to a real MySQL instance. 16 tests covering:
 - Challenge CRUD (List, Get, Submit, Admin CRUD, Submissions list)
 - Competition CRUD
 - Competition challenge assignment

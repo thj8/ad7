@@ -11,7 +11,7 @@ A multi-competition CTF (Capture The Flag) Jeopardy platform built with Go.
 - **Per-competition notifications** — Admin can post announcements scoped to a competition
 - **Competition analytics** — Detailed statistics including overview, category-wise, user-wise, and challenge-wise analytics
 - **Plugin system** — Extensible compile-time plugin interface for adding new features
-- **Snowflake IDs** — All public-facing IDs use snowflake algorithm for distributed-friendly unique identifiers
+- **UUID IDs** — All public-facing IDs use UUID v4 (32-character hex strings without hyphens) for unique identifiers
 - **JWT authentication** — Bearer token auth with admin role gating (user management handled externally)
 
 ## Quick Start
@@ -96,6 +96,10 @@ All endpoints require a Bearer JWT token in the `Authorization` header. Admin en
 | GET | `/api/v1/competitions/{id}/analytics/categories` | Category-wise statistics |
 | GET | `/api/v1/competitions/{id}/analytics/users` | User performance statistics |
 | GET | `/api/v1/competitions/{id}/analytics/challenges` | Challenge difficulty statistics |
+| POST | `/api/v1/admin/challenges/{id}/hints` | Create challenge hint |
+| PUT | `/api/v1/admin/hints/{id}` | Update challenge hint |
+| DELETE | `/api/v1/admin/hints/{id}` | Delete challenge hint |
+| GET | `/api/v1/challenges/{id}/hints` | List visible challenge hints |
 
 ### Competition Analytics
 
@@ -132,7 +136,7 @@ The analytics plugin provides detailed statistics for competitions:
 - **Go 1.22** with [chi](https://github.com/go-chi/chi/v5) router
 - **MySQL** via `database/sql`
 - **JWT** (HS256) via `golang-jwt/jwt/v5`
-- **Snowflake ID** — custom implementation for unique distributed IDs
+- **UUID v4** — custom implementation for 32-character hex UUIDs without hyphens
 
 ## Project Structure
 
@@ -156,7 +160,9 @@ The analytics plugin provides detailed statistics for competitions:
 ├── plugins/
 │   ├── leaderboard/      # Per-competition leaderboard
 │   ├── notification/     # Per-competition notifications
-│   └── analytics/        # Competition analytics (overview, categories, users, challenges)
+│   ├── analytics/        # Competition analytics (overview, categories, users, challenges)
+│   ├── hints/            # Challenge hints system
+│   └── dashboard/        # Competition dashboard with first blood
 ├── sql/schema.sql        # Database schema
 └── config.yaml           # Configuration
 ```
