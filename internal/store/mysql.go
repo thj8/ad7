@@ -118,40 +118,41 @@ func (s *Store) Delete(ctx context.Context, resID string) error {
 	return err
 }
 
-// HasCorrectSubmission 检查指定用户是否已正确提交过某道题目（全局范围）。
-// 用于防止用户对同一题目重复提交正确的 Flag。
-func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string) (bool, error) {
+// HasCorrectSubmission 检查指定用户在指定比赛中是否已正确提交过某道题目。
+// 用于防止重复提交，competitionID 为必填参数。
+func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1 AND is_deleted=0`
 	var count int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1 AND is_deleted=0`,
-		userID, challengeID).Scan(&count)
+	err := s.db.QueryRowContext(ctx, query, userID, challengeID, competitionID).Scan(&count)
 	return count > 0, err
 }
 
-// CreateSubmission 创建一条全局提交记录（不关联比赛）。
-// 自动生成 res_id，CompetitionID 为空。
+// CreateSubmission 创建提交记录。
+// CompetitionID 为必填字段，所有提交都关联到比赛。
 func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) error {
 	sub.ResID = uuid.Next()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO submissions (res_id, user_id, challenge_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?)`,
-		sub.ResID, sub.UserID, sub.ChallengeID, sub.SubmittedFlag, sub.IsCorrect)
+		`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
+		sub.ResID, sub.UserID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
 	return err
 }
 
-// ListSubmissions 根据用户 ID 和/或题目 ID 查询提交记录。
-// 参数均可为空字符串表示不过滤。动态拼接 SQL 条件。按创建时间倒序排列。
-func (s *Store) ListSubmissions(ctx context.Context, userID string, challengeID string) ([]model.Submission, error) {
+// ListSubmissions 根据 params 查询提交记录。
+// 按创建时间倒序排列。动态拼接 SQL 条件。
+func (s *Store) ListSubmissions(ctx context.Context, params ListSubmissionsParams) ([]model.Submission, error) {
 	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE is_deleted=0`
 	args := []any{}
-	// 动态拼接用户 ID 过滤条件
-	if userID != "" {
-		query += " AND user_id=?"
-		args = append(args, userID)
+	if params.CompetitionID != "" {
+		query += " AND competition_id=?"
+		args = append(args, params.CompetitionID)
 	}
-	// 动态拼接题目 ID 过滤条件
-	if challengeID != "" {
+	if params.UserID != "" {
+		query += " AND user_id=?"
+		args = append(args, params.UserID)
+	}
+	if params.ChallengeID != "" {
 		query += " AND challenge_id=?"
-		args = append(args, challengeID)
+		args = append(args, params.ChallengeID)
 	}
 	query += " ORDER BY created_at DESC"
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -298,57 +299,3 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.
 	return cs, rows.Err()
 }
 
-// --- SubmissionStore 扩展方法实现 ---
-
-// HasCorrectSubmissionInComp 检查指定用户在指定比赛中是否已正确提交过某道题目。
-// 用于比赛场景下防止重复提交。
-func (s *Store) HasCorrectSubmissionInComp(ctx context.Context, userID string, challengeID, competitionID string) (bool, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1 AND is_deleted=0`,
-		userID, challengeID, competitionID).Scan(&count)
-	return count > 0, err
-}
-
-// CreateSubmissionWithComp 创建一条关联比赛的提交记录。
-// 自动生成 res_id，CompetitionID 指向所属比赛。
-func (s *Store) CreateSubmissionWithComp(ctx context.Context, sub *model.Submission) error {
-	sub.ResID = uuid.Next()
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
-		sub.ResID, sub.UserID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
-	return err
-}
-
-// ListSubmissionsByComp 查询指定比赛内的提交记录。
-// 可通过用户 ID 和题目 ID 进一步过滤。动态拼接 SQL 条件。按创建时间倒序排列。
-func (s *Store) ListSubmissionsByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
-	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE competition_id=? AND is_deleted=0`
-	args := []any{competitionID}
-	// 动态拼接用户 ID 过滤条件
-	if userID != "" {
-		query += " AND user_id=?"
-		args = append(args, userID)
-	}
-	// 动态拼接题目 ID 过滤条件
-	if challengeID != "" {
-		query += " AND challenge_id=?"
-		args = append(args, challengeID)
-	}
-	query += " ORDER BY created_at DESC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var subs []model.Submission
-	for rows.Next() {
-		var sub model.Submission
-		if err := rows.Scan(&sub.ResID, &sub.UserID, &sub.ChallengeID, &sub.CompetitionID,
-			&sub.SubmittedFlag, &sub.IsCorrect, &sub.CreatedAt); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	return subs, rows.Err()
-}

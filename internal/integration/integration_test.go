@@ -67,7 +67,6 @@ func TestMain(m *testing.M) {
 		r.Use(auth.Authenticate)
 		r.Get("/challenges", challengeH.List)
 		r.Get("/challenges/{id}", challengeH.Get)
-		r.Post("/challenges/{id}/submit", submissionH.Submit)
 		r.Get("/competitions", compH.List)
 		r.Get("/competitions/{id}", compH.Get)
 		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
@@ -77,7 +76,7 @@ func TestMain(m *testing.M) {
 			r.Post("/challenges", challengeH.Create)
 			r.Put("/challenges/{id}", challengeH.Update)
 			r.Delete("/challenges/{id}", challengeH.Delete)
-			r.Get("/submissions", submissionH.List)
+			r.Get("/competitions/{id}/submissions", submissionH.ListByComp)
 			r.Post("/competitions", compH.Create)
 			r.Get("/competitions", compH.ListAll)
 			r.Put("/competitions/{id}", compH.Update)
@@ -186,6 +185,19 @@ func TestListChallenges(t *testing.T) {
 		t.Fatal("expected challenges key")
 	}
 
+	// create a challenge and verify flag is not in list response
+	doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"FlagTest","description":"D","score":100,"flag":"flag{secret}"}`, adminTok).Body.Close()
+	resp = doRequest(t, "GET", "/api/v1/challenges", "", adminTok)
+	assertStatus(t, resp, 200)
+	body = decodeJSON(t, resp)
+	for _, c := range body["challenges"].([]any) {
+		ch := c.(map[string]any)
+		if _, hasFlag := ch["flag"]; hasFlag {
+			t.Fatal("flag must not appear in challenge list response")
+		}
+	}
+
 	// 401 no token
 	resp = doRequest(t, "GET", "/api/v1/challenges", "", "")
 	assertStatus(t, resp, 401)
@@ -222,62 +234,6 @@ func TestGetChallenge(t *testing.T) {
 
 	// 401
 	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/challenges/%s", id), "", "")
-	assertStatus(t, resp, 401)
-	resp.Body.Close()
-}
-
-func TestSubmitFlag(t *testing.T) {
-	cleanup(t)
-	adminTok := makeToken("admin1", "admin")
-	userTok := makeToken("user1", "user")
-
-	// create challenge
-	resp := doRequest(t, "POST", "/api/v1/admin/challenges",
-		`{"title":"T2","description":"D","score":100,"flag":"flag{correct}"}`, adminTok)
-	assertStatus(t, resp, 201)
-	b := decodeJSON(t, resp)
-	id := getID(t, b)
-	path := fmt.Sprintf("/api/v1/challenges/%s/submit", id)
-
-	// wrong flag
-	resp = doRequest(t, "POST", path, `{"flag":"flag{wrong}"}`, userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	if b["success"] != false {
-		t.Fatal("expected success=false for wrong flag")
-	}
-	if b["message"] != "incorrect" {
-		t.Fatalf("expected message=incorrect, got %v", b["message"])
-	}
-
-	// correct flag
-	resp = doRequest(t, "POST", path, `{"flag":"flag{correct}"}`, userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	if b["success"] != true {
-		t.Fatal("expected success=true for correct flag")
-	}
-
-	// already solved
-	resp = doRequest(t, "POST", path, `{"flag":"flag{correct}"}`, userTok)
-	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
-	if b["message"] != "already_solved" {
-		t.Fatalf("expected already_solved, got %v", b["message"])
-	}
-
-	// 400 missing flag
-	resp = doRequest(t, "POST", path, `{}`, userTok)
-	assertStatus(t, resp, 400)
-	resp.Body.Close()
-
-	// 404 bad id
-	resp = doRequest(t, "POST", "/api/v1/challenges/00000000000000000000000000000000/submit", `{"flag":"x"}`, userTok)
-	assertStatus(t, resp, 404)
-	resp.Body.Close()
-
-	// 401
-	resp = doRequest(t, "POST", path, `{"flag":"flag{correct}"}`, "")
 	assertStatus(t, resp, 401)
 	resp.Body.Close()
 }
@@ -384,42 +340,51 @@ func TestAdminListSubmissions(t *testing.T) {
 	adminTok := makeToken("admin1", "admin")
 	userTok := makeToken("user1", "user")
 
-	// create challenge and submit
-	resp := doRequest(t, "POST", "/api/v1/admin/challenges",
+	// create competition + challenge + submit in comp
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"CompSub","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
 		`{"title":"T6","description":"D","score":100,"flag":"flag{s}"}`, adminTok)
 	assertStatus(t, resp, 201)
-	b := decodeJSON(t, resp)
-	id := getID(t, b)
+	chalID := getID(t, decodeJSON(t, resp))
 
-	doRequest(t, "POST", fmt.Sprintf("/api/v1/challenges/%s/submit", id),
+	// add challenge to competition
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok).Body.Close()
+
+	// submit in competition
+	doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
 		`{"flag":"flag{s}"}`, userTok)
 
 	// 200 unfiltered
-	resp = doRequest(t, "GET", "/api/v1/admin/submissions", "", adminTok)
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/competitions/%s/submissions", compID), "", adminTok)
 	assertStatus(t, resp, 200)
-	b = decodeJSON(t, resp)
+	b := decodeJSON(t, resp)
 	subs := b["submissions"].([]any)
 	if len(subs) == 0 {
 		t.Fatal("expected at least 1 submission")
 	}
 
 	// 200 filtered by user_id
-	resp = doRequest(t, "GET", "/api/v1/admin/submissions?user_id=user1", "", adminTok)
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/competitions/%s/submissions?user_id=user1", compID), "", adminTok)
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	// 200 filtered by challenge_id
-	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/submissions?challenge_id=%s", id), "", adminTok)
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/competitions/%s/submissions?challenge_id=%s", compID, chalID), "", adminTok)
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	// 403
-	resp = doRequest(t, "GET", "/api/v1/admin/submissions", "", userTok)
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/competitions/%s/submissions", compID), "", userTok)
 	assertStatus(t, resp, 403)
 	resp.Body.Close()
 
 	// 401
-	resp = doRequest(t, "GET", "/api/v1/admin/submissions", "", "")
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/admin/competitions/%s/submissions", compID), "", "")
 	assertStatus(t, resp, 401)
 	resp.Body.Close()
 }
@@ -512,6 +477,13 @@ func TestCompetitionChallenges(t *testing.T) {
 	chals := b["challenges"].([]any)
 	if len(chals) != 1 {
 		t.Fatalf("expected 1 challenge, got %d", len(chals))
+	}
+	// verify flag not leaked in competition challenge list
+	for _, c := range chals {
+		ch := c.(map[string]any)
+		if _, hasFlag := ch["flag"]; hasFlag {
+			t.Fatal("flag must not appear in competition challenge list response")
+		}
 	}
 
 	// Remove challenge from competition

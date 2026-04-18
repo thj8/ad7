@@ -76,10 +76,9 @@ func main() {
 		// 所有 /api/v1 路由都需要 JWT 认证
 		r.Use(auth.Authenticate)
 
-		// 公开路由：题目列表、题目详情、提交 Flag
+		// 公开路由：题目列表、题目详情
 		r.Get("/challenges", challengeH.List)
 		r.Get("/challenges/{id}", challengeH.Get)
-		r.Post("/challenges/{id}/submit", submissionH.Submit)
 
 		// 公开路由：比赛列表、比赛详情、比赛下的题目列表、比赛内提交 Flag
 		r.Get("/competitions", compH.List)
@@ -97,7 +96,7 @@ func main() {
 			r.Delete("/challenges/{id}", challengeH.Delete)
 
 			// 提交记录查询
-			r.Get("/submissions", submissionH.List)
+			r.Get("/competitions/{id}/submissions", submissionH.ListByComp)
 
 			// 比赛管理：创建、查询全部（含未激活）、更新、删除
 			r.Post("/competitions", compH.Create)
@@ -116,7 +115,7 @@ func main() {
 		leaderboard.New(),  // 排行榜插件
 		notification.New(), // 通知插件
 		analytics.New(),    // 分析插件
-		topthree.New(),     // 三血插件
+		topthree.New(),     // 一二三血插件
 		hints.New(),        // 题目提示插件
 	}
 	for _, p := range plugins {

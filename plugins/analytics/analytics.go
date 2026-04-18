@@ -5,7 +5,6 @@ package analytics
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
+	"ad7/internal/pluginutil"
 )
 
 // Plugin 是分析插件，持有数据库连接。
@@ -62,12 +62,10 @@ type categoryResponse struct {
 }
 
 // overview 处理比赛总览分析请求。
-// 统计比赛的基本数据：参赛人数、题目数、提交数、正确提交数、
-// 人均解题数、平均解题时间、完成率。
 func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
-	if len(compID) != 32 {
-		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
 
@@ -75,47 +73,33 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	var resp overviewResponse
 
 	// 查询比赛中的题目总数
-	err := p.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ?
-	`, compID).Scan(&resp.TotalChallenges)
+	totalChallenges, err := pluginutil.GetCompChallengeCount(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	resp.TotalChallenges = totalChallenges
 
 	// 查询有提交记录的用户数
-	err = p.db.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
-	`, compID).Scan(&resp.TotalUsers)
+	totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	resp.TotalUsers = totalUsers
 
 	// 查询总提交数和正确提交数
-	err = p.db.QueryRowContext(ctx, `
-		SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
-		FROM submissions WHERE competition_id = ? AND is_deleted = 0
-	`, compID).Scan(&resp.TotalSubmissions, &resp.CorrectSubmissions)
+	totalSubs, correctSubs, err := pluginutil.GetCompSubmitStats(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	resp.TotalSubmissions = totalSubs
+	resp.CorrectSubmissions = correctSubs
 
 	// 计算人均解题数和完成率
 	if resp.TotalUsers > 0 {
-		var totalCorrectSolves int
-		err = p.db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM submissions
-			WHERE competition_id = ? AND is_correct = 1 AND is_deleted = 0
-			`, compID).Scan(&totalCorrectSolves)
-		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
-		}
-		resp.AverageSolves = float64(totalCorrectSolves) / float64(resp.TotalUsers)
-
-		// 完成率 = 人均解题数 / 题目总数 * 100
+		resp.AverageSolves = float64(correctSubs) / float64(resp.TotalUsers)
 		if resp.TotalChallenges > 0 {
 			resp.CompletionRate = (resp.AverageSolves / float64(resp.TotalChallenges)) * 100
 		}
@@ -130,7 +114,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0 AND c.is_deleted = 0
 	`, compID).Scan(&avgSolveTimeSec)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	if avgSolveTimeSec.Valid {
@@ -139,20 +123,25 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		resp.AverageSolveTime = "0"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	pluginutil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // byCategory 处理按分类统计的请求。
-// 统计每个分类的题目数、解题数、独立用户数、人均解题数和成功率。
 func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
-	if len(compID) != 32 {
-		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
 
 	ctx := r.Context()
+
+	// 查询比赛总用户数（查询一次，移到循环外）
+	totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
 
 	// 查询比赛中各分类的题目数
 	rows, err := p.db.QueryContext(ctx, `
@@ -163,7 +152,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		GROUP BY c.category
 	`, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -172,7 +161,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var cat categoryStats
 		if err := rows.Scan(&cat.Category, &cat.TotalChallenges); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 
@@ -186,17 +175,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			AND s.is_correct = 1 AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
 			`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
 		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
-		}
-
-		// 查询比赛总用户数用于计算人均解题数
-		var totalUsers int
-		err = p.db.QueryRowContext(ctx, `
-			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
-			`, compID).Scan(&totalUsers)
-		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 
@@ -215,11 +194,10 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
 			`, compID, compID, cat.Category).Scan(&totalAttempts)
 		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 
-		// 成功率 = 正确提交数 / 总提交数 * 100
 		if totalAttempts > 0 {
 			cat.SuccessRate = (float64(cat.TotalSolves) / float64(totalAttempts)) * 100
 		}
@@ -231,8 +209,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		categories = []categoryStats{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(categoryResponse{Categories: categories})
+	pluginutil.WriteJSON(w, http.StatusOK, categoryResponse{Categories: categories})
 }
 
 // userStats 是单个用户的统计数据。
@@ -252,12 +229,11 @@ type userStatsResponse struct {
 }
 
 // userStats 处理用户统计请求。
-// 查询比赛中每个用户的解题数、得分、提交次数、成功率、首次和最后解题时间。
-// 按总分降序排列，同分按首次解题时间升序排列。
+// 复杂聚合查询，不适合提取到共享函数，保持内联。
 func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
-	if len(compID) != 32 {
-		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
 
@@ -278,7 +254,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		ORDER BY total_score DESC, first_solve ASC
 		`, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -295,16 +271,14 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 			&firstSolve,
 			&lastSolve,
 		); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 
-		// 计算成功率
 		if u.TotalAttempts > 0 {
 			u.SuccessRate = (float64(u.TotalSolves) / float64(u.TotalAttempts)) * 100
 		}
 
-		// 格式化时间字段
 		if firstSolve.Valid {
 			u.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
 		}
@@ -319,8 +293,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		users = []userStats{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(userStatsResponse{Users: users})
+	pluginutil.WriteJSON(w, http.StatusOK, userStatsResponse{Users: users})
 }
 
 // challengeStats 是单个题目的统计数据。
@@ -343,36 +316,29 @@ type challengeStatsResponse struct {
 }
 
 // challengeStats 处理题目统计请求。
-// 统计比赛中每道题目的解题数、提交次数、成功率、独立用户数、
-// 首次解题时间和平均解题时间（从首次提交到正确提交的时间差）。
 func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
-	if len(compID) != 32 {
-		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
 
 	ctx := r.Context()
 
-	// 查询比赛中所有题目
-	chalRows, err := p.db.QueryContext(ctx, `
-		SELECT c.res_id, c.title, c.category, c.score
-		FROM competition_challenges cc
-		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ? AND c.is_deleted = 0
-		`, compID)
+	// 查询比赛中所有题目（使用共享查询函数）
+	challenges, err := pluginutil.GetCompChallenges(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	defer chalRows.Close()
 
-	var challenges []challengeStats
-	for chalRows.Next() {
-		var cs challengeStats
-		if err := chalRows.Scan(&cs.ChallengeID, &cs.Title, &cs.Category, &cs.Score); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
+	var result []challengeStats
+	for _, ch := range challenges {
+		cs := challengeStats{
+			ChallengeID: ch.ResID,
+			Title:       ch.Title,
+			Category:    ch.Category,
+			Score:       ch.Score,
 		}
 
 		// 查询该题目的提交统计
@@ -392,16 +358,14 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 			&firstSolve,
 		)
 		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 
-		// 计算成功率
 		if cs.TotalAttempts > 0 {
 			cs.SuccessRate = (float64(cs.TotalSolves) / float64(cs.TotalAttempts)) * 100
 		}
 
-		// 格式化首次解题时间
 		if firstSolve.Valid {
 			cs.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
 		}
@@ -422,7 +386,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 			) user_times
 			`, compID, cs.ChallengeID).Scan(&avgSolveTime)
 		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		if avgSolveTime.Valid {
@@ -431,13 +395,12 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 			cs.AverageSolveTime = "0"
 		}
 
-		challenges = append(challenges, cs)
+		result = append(result, cs)
 	}
 
-	if challenges == nil {
-		challenges = []challengeStats{}
+	if result == nil {
+		result = []challengeStats{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(challengeStatsResponse{Challenges: challenges})
+	pluginutil.WriteJSON(w, http.StatusOK, challengeStatsResponse{Challenges: result})
 }

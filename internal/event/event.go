@@ -22,7 +22,7 @@ type Event struct {
 	Type          EventType       // 事件类型
 	UserID        string          // 提交用户的 ID
 	ChallengeID   string          // 题目的 res_id
-	CompetitionID *string         // 所属比赛的 res_id，nil 表示全局提交
+	CompetitionID string          // 所属比赛的 res_id
 	Ctx           context.Context // 请求上下文
 }
 

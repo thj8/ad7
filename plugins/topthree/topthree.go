@@ -165,18 +165,8 @@ func (p *Plugin) updateTopThree(ctx context.Context, req *updateTopThreeRequest)
 }
 
 // handleCorrectSubmission 处理正确提交事件，更新三血排名。
-// 流程：
-//  1. 忽略非比赛提交（CompetitionID 为空）
-//  2. 查询当前三血记录
-//  3. 检查用户是否已上榜
-//  4. 计算新排名
-//  5. 在事务中更新排名
 func (p *Plugin) handleCorrectSubmission(e event.Event) {
-	// 只处理比赛内的提交
-	if e.CompetitionID == nil || *e.CompetitionID == "" {
-		return
-	}
-	compID := *e.CompetitionID
+	compID := e.CompetitionID
 	chalID := e.ChallengeID
 	userID := e.UserID
 	submitTime := time.Now()
