@@ -15,6 +15,7 @@ import (
 	"ad7/internal/handler"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
+	"ad7/internal/router"
 	"ad7/internal/service"
 	"ad7/internal/store"
 	"ad7/plugins/analytics"
@@ -71,48 +72,13 @@ func main() {
 	r.Use(chimw.Logger)    // 请求日志记录
 	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
 
-	// 注册 API v1 路由组
-	r.Route("/api/v1", func(r chi.Router) {
-		// 所有 /api/v1 路由都需要 JWT 认证
-		r.Use(auth.Authenticate)
-
-		// 公开路由：题目列表、题目详情
-		r.Get("/challenges", challengeH.List)
-		r.Get("/challenges/{id}", challengeH.Get)
-
-		// 公开路由：比赛列表、比赛详情、比赛下的题目列表、比赛内提交 Flag
-		r.Get("/competitions", compH.List)
-		r.Get("/competitions/{id}", compH.Get)
-		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
-		r.With(
-			middleware.LimitByUserID(
-				cfg.RateLimit.Submission.Requests,
-				cfg.RateLimit.Submission.Window,
-			),
-		).Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
-
-		// 管理员路由：需要 admin 角色
-		r.Route("/admin", func(r chi.Router) {
-			r.Use(auth.RequireAdmin)
-
-			// 题目管理：创建、更新、删除
-			r.Post("/challenges", challengeH.Create)
-			r.Put("/challenges/{id}", challengeH.Update)
-			r.Delete("/challenges/{id}", challengeH.Delete)
-
-			// 提交记录查询
-			r.Get("/competitions/{id}/submissions", submissionH.ListByComp)
-
-			// 比赛管理：创建、查询全部（含未激活）、更新、删除
-			r.Post("/competitions", compH.Create)
-			r.Get("/competitions", compH.ListAll)
-			r.Put("/competitions/{id}", compH.Update)
-			r.Delete("/competitions/{id}", compH.Delete)
-
-			// 比赛题目分配：添加/移除题目
-			r.Post("/competitions/{id}/challenges", compH.AddChallenge)
-			r.Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
-		})
+	// 注册 API v1 路由组（通过 router 包统一注册）
+	router.RegisterAPIV1(r, router.RouteDeps{
+		Auth:         auth,
+		Config:       cfg,
+		ChallengeH:   challengeH,
+		CompetitionH: compH,
+		SubmissionH:  submissionH,
 	})
 
 	// 初始化所有插件并注册路由
