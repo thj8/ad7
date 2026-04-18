@@ -11,3 +11,8 @@ db:
 jwt:
   secret: "change-me-in-production"
   admin_role: "admin"
+
+rate_limit:
+  submission:
+    requests: 3
+    window: 10s
