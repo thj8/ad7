@@ -7,8 +7,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// getTopThree 处理获取比赛三血排名的请求。
+// 返回指定比赛中每道题目的前三名正确提交者信息。
 func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
+	// 验证比赛 ID 格式（32 字符 UUID）
 	if len(compID) != 32 {
 		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
 		return
@@ -16,6 +19,7 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// 查询比赛中所有题目
 	chalRows, err := p.db.QueryContext(ctx, `
 		SELECT c.res_id, c.title, c.category, c.score
 		FROM challenges c
@@ -39,6 +43,7 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 		challenges = append(challenges, ct)
 	}
 
+	// 为每道题目查询三血排名
 	for i := range challenges {
 		chal := &challenges[i]
 		rows, err := p.db.QueryContext(ctx, `
@@ -68,6 +73,7 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 		chal.TopThree = topThree
 	}
 
+	// 构建响应
 	resp := topThreeResponse{
 		CompetitionID: compID,
 		Challenges:    challenges,

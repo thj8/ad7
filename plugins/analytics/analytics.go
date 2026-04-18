@@ -1,3 +1,6 @@
+// Package analytics 实现比赛分析插件。
+// 提供四个维度的分析接口：总览、分类统计、用户统计、题目统计。
+// 所有接口需要认证，数据限定在比赛范围内。
 package analytics
 
 import (
@@ -12,10 +15,18 @@ import (
 	"ad7/internal/middleware"
 )
 
+// Plugin 是分析插件，持有数据库连接。
 type Plugin struct{ db *sql.DB }
 
+// New 创建分析插件实例。
 func New() *Plugin { return &Plugin{} }
 
+// Register 注册分析相关的路由。
+// 路由（均需认证）：
+//   - GET /api/v1/competitions/{id}/analytics/overview（总览）
+//   - GET /api/v1/competitions/{id}/analytics/categories（分类统计）
+//   - GET /api/v1/competitions/{id}/analytics/users（用户统计）
+//   - GET /api/v1/competitions/{id}/analytics/challenges（题目统计）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	p.db = db
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/overview", p.overview)
@@ -24,29 +35,35 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/challenges", p.challengeStats)
 }
 
+// overviewResponse 是比赛总览分析的响应结构。
 type overviewResponse struct {
-	TotalUsers         int     `json:"total_users"`
-	TotalChallenges    int     `json:"total_challenges"`
-	TotalSubmissions   int     `json:"total_submissions"`
-	CorrectSubmissions int     `json:"correct_submissions"`
-	AverageSolves      float64 `json:"average_solves"`
-	AverageSolveTime   string  `json:"average_solve_time_seconds"`
-	CompletionRate     float64 `json:"completion_rate"`
+	TotalUsers         int     `json:"total_users"`          // 参赛总人数
+	TotalChallenges    int     `json:"total_challenges"`     // 题目总数
+	TotalSubmissions   int     `json:"total_submissions"`    // 总提交数
+	CorrectSubmissions int     `json:"correct_submissions"`  // 正确提交数
+	AverageSolves      float64 `json:"average_solves"`       // 人均解题数
+	AverageSolveTime   string  `json:"average_solve_time_seconds"` // 平均解题时间（秒）
+	CompletionRate     float64 `json:"completion_rate"`      // 完成率（%）
 }
 
+// categoryStats 是单个分类的统计数据。
 type categoryStats struct {
-	Category         string  `json:"category"`
-	TotalChallenges  int     `json:"total_challenges"`
-	TotalSolves      int     `json:"total_solves"`
-	UniqueUsersSolved int    `json:"unique_users_solved"`
-	AverageSolves    float64 `json:"average_solves_per_user"`
-	SuccessRate      float64 `json:"success_rate"`
+	Category         string  `json:"category"`            // 分类名称
+	TotalChallenges  int     `json:"total_challenges"`    // 该分类题目数
+	TotalSolves      int     `json:"total_solves"`        // 该分类总解题数
+	UniqueUsersSolved int    `json:"unique_users_solved"` // 该分类独立解题用户数
+	AverageSolves    float64 `json:"average_solves_per_user"` // 人均解题数
+	SuccessRate      float64 `json:"success_rate"`        // 成功率（%）
 }
 
+// categoryResponse 是分类统计的响应结构。
 type categoryResponse struct {
 	Categories []categoryStats `json:"categories"`
 }
 
+// overview 处理比赛总览分析请求。
+// 统计比赛的基本数据：参赛人数、题目数、提交数、正确提交数、
+// 人均解题数、平均解题时间、完成率。
 func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	if len(compID) != 32 {
@@ -57,7 +74,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var resp overviewResponse
 
-	// Get total challenges in competition
+	// 查询比赛中的题目总数
 	err := p.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ?
 	`, compID).Scan(&resp.TotalChallenges)
@@ -66,7 +83,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get total users who submitted
+	// 查询有提交记录的用户数
 	err = p.db.QueryRowContext(ctx, `
 		SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
 	`, compID).Scan(&resp.TotalUsers)
@@ -75,7 +92,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get total submissions and correct submissions
+	// 查询总提交数和正确提交数
 	err = p.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
 		FROM submissions WHERE competition_id = ? AND is_deleted = 0
@@ -85,7 +102,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Calculate average solves per user (users who have at least one correct submission)
+	// 计算人均解题数和完成率
 	if resp.TotalUsers > 0 {
 		var totalCorrectSolves int
 		err = p.db.QueryRowContext(ctx, `
@@ -98,14 +115,13 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.AverageSolves = float64(totalCorrectSolves) / float64(resp.TotalUsers)
 
-		// Calculate completion rate (average % of challenges solved per user)
+		// 完成率 = 人均解题数 / 题目总数 * 100
 		if resp.TotalChallenges > 0 {
 			resp.CompletionRate = (resp.AverageSolves / float64(resp.TotalChallenges)) * 100
 		}
 	}
 
-	// Calculate average time to first solve (for challenges that have been solved)
-	// This is the average time between competition start and first correct submission
+	// 计算平均解题时间（从比赛开始到首次正确提交的平均秒数）
 	var avgSolveTimeSec sql.NullFloat64
 	err = p.db.QueryRowContext(ctx, `
 		SELECT AVG(TIMESTAMPDIFF(SECOND, c.start_time, s.created_at))
@@ -127,6 +143,8 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// byCategory 处理按分类统计的请求。
+// 统计每个分类的题目数、解题数、独立用户数、人均解题数和成功率。
 func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	if len(compID) != 32 {
@@ -136,7 +154,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Get all challenges in this competition with their categories
+	// 查询比赛中各分类的题目数
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT c.category, COUNT(DISTINCT cc.challenge_id) as total_challenges
 		FROM competition_challenges cc
@@ -158,7 +176,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Get total correct solves for this category
+		// 查询该分类的正确解题数和独立用户数
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(*), COUNT(DISTINCT s.user_id)
 			FROM submissions s
@@ -172,7 +190,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Get total users in competition
+		// 查询比赛总用户数用于计算人均解题数
 		var totalUsers int
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
@@ -186,7 +204,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			cat.AverageSolves = float64(cat.TotalSolves) / float64(totalUsers)
 		}
 
-		// Get total attempts (all submissions) for this category
+		// 查询该分类的总提交数用于计算成功率
 		var totalAttempts int
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
@@ -201,6 +219,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// 成功率 = 正确提交数 / 总提交数 * 100
 		if totalAttempts > 0 {
 			cat.SuccessRate = (float64(cat.TotalSolves) / float64(totalAttempts)) * 100
 		}
@@ -216,20 +235,25 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categoryResponse{Categories: categories})
 }
 
+// userStats 是单个用户的统计数据。
 type userStats struct {
-	UserID            string  `json:"user_id"`
-	TotalSolves       int     `json:"total_solves"`
-	TotalScore        int     `json:"total_score"`
-	TotalAttempts     int     `json:"total_attempts"`
-	SuccessRate       float64 `json:"success_rate"`
-	FirstSolveTime    string  `json:"first_solve_time"`
-	LastSolveTime     string  `json:"last_solve_time"`
+	UserID         string  `json:"user_id"`          // 用户 ID
+	TotalSolves    int     `json:"total_solves"`     // 正确解题数
+	TotalScore     int     `json:"total_score"`      // 总得分
+	TotalAttempts  int     `json:"total_attempts"`   // 总提交次数
+	SuccessRate    float64 `json:"success_rate"`     // 成功率（%）
+	FirstSolveTime string  `json:"first_solve_time"` // 首次解题时间（RFC3339）
+	LastSolveTime  string  `json:"last_solve_time"`  // 最后解题时间（RFC3339）
 }
 
+// userStatsResponse 是用户统计的响应结构。
 type userStatsResponse struct {
 	Users []userStats `json:"users"`
 }
 
+// userStats 处理用户统计请求。
+// 查询比赛中每个用户的解题数、得分、提交次数、成功率、首次和最后解题时间。
+// 按总分降序排列，同分按首次解题时间升序排列。
 func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	if len(compID) != 32 {
@@ -275,10 +299,12 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// 计算成功率
 		if u.TotalAttempts > 0 {
 			u.SuccessRate = (float64(u.TotalSolves) / float64(u.TotalAttempts)) * 100
 		}
 
+		// 格式化时间字段
 		if firstSolve.Valid {
 			u.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
 		}
@@ -297,23 +323,28 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(userStatsResponse{Users: users})
 }
 
+// challengeStats 是单个题目的统计数据。
 type challengeStats struct {
-	ChallengeID       string  `json:"challenge_id"`
-	Title             string  `json:"title"`
-	Category          string  `json:"category"`
-	Score             int     `json:"score"`
-	TotalSolves       int     `json:"total_solves"`
-	TotalAttempts     int     `json:"total_attempts"`
-	SuccessRate       float64 `json:"success_rate"`
-	UniqueUsersSolved int     `json:"unique_users_solved"`
-	FirstSolveTime    string  `json:"first_solve_time"`
-	AverageSolveTime  string  `json:"average_solve_time_seconds"`
+	ChallengeID       string  `json:"challenge_id"`            // 题目 ID
+	Title             string  `json:"title"`                   // 题目标题
+	Category          string  `json:"category"`                // 题目分类
+	Score             int     `json:"score"`                   // 题目分值
+	TotalSolves       int     `json:"total_solves"`            // 正确解题数
+	TotalAttempts     int     `json:"total_attempts"`          // 总提交次数
+	SuccessRate       float64 `json:"success_rate"`            // 成功率（%）
+	UniqueUsersSolved int     `json:"unique_users_solved"`     // 独立解题用户数
+	FirstSolveTime    string  `json:"first_solve_time"`        // 首次解题时间（RFC3339）
+	AverageSolveTime  string  `json:"average_solve_time_seconds"` // 平均解题时间（秒）
 }
 
+// challengeStatsResponse 是题目统计的响应结构。
 type challengeStatsResponse struct {
 	Challenges []challengeStats `json:"challenges"`
 }
 
+// challengeStats 处理题目统计请求。
+// 统计比赛中每道题目的解题数、提交次数、成功率、独立用户数、
+// 首次解题时间和平均解题时间（从首次提交到正确提交的时间差）。
 func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	if len(compID) != 32 {
@@ -323,7 +354,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Get all challenges in competition first
+	// 查询比赛中所有题目
 	chalRows, err := p.db.QueryContext(ctx, `
 		SELECT c.res_id, c.title, c.category, c.score
 		FROM competition_challenges cc
@@ -344,7 +375,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Get solve stats for this challenge
+		// 查询该题目的提交统计
 		var firstSolve sql.NullTime
 		err = p.db.QueryRowContext(ctx, `
 			SELECT
@@ -365,15 +396,17 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// 计算成功率
 		if cs.TotalAttempts > 0 {
 			cs.SuccessRate = (float64(cs.TotalSolves) / float64(cs.TotalAttempts)) * 100
 		}
 
+		// 格式化首次解题时间
 		if firstSolve.Valid {
 			cs.FirstSolveTime = firstSolve.Time.Format(time.RFC3339)
 		}
 
-		// Get average time from first submission to correct submission per user
+		// 计算平均解题时间（每个用户从首次提交到正确提交的平均秒数）
 		var avgSolveTime sql.NullFloat64
 		err = p.db.QueryRowContext(ctx, `
 			SELECT AVG(TIMESTAMPDIFF(SECOND, first_submit, correct_submit))

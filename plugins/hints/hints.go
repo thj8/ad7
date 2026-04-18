@@ -1,3 +1,6 @@
+// Package hints 实现题目提示插件。
+// 管理员可以为每道题目创建、更新、删除提示（支持软删除和可见性控制），
+// 普通用户只能查看可见的提示列表。
 package hints
 
 import (
@@ -9,28 +12,42 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
-	"ad7/internal/snowflake"
+	"ad7/internal/uuid"
 )
 
+// Plugin 是提示插件，持有数据库连接。
 type Plugin struct{ db *sql.DB }
 
+// New 创建提示插件实例。
 func New() *Plugin { return &Plugin{} }
 
+// hint 表示一条题目提示。
 type hint struct {
-	ResID     string    `json:"id"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ResID     string    `json:"id"`         // 提示的 UUID 标识
+	Content   string    `json:"content"`    // 提示内容
+	CreatedAt time.Time `json:"created_at"` // 创建时间
 }
 
+// createReq 是创建提示的请求体结构。
 type createReq struct {
-	Content string `json:"content"`
+	Content string `json:"content"` // 提示内容（必填，最大 4096 字符）
 }
 
+// updateReq 是更新提示的请求体结构。
+// 使用指针类型区分"未提供"和"设为空值"。
 type updateReq struct {
-	Content   *string `json:"content"`
-	IsVisible *bool   `json:"is_visible"`
+	Content   *string `json:"content"`    // 提示内容（可选）
+	IsVisible *bool   `json:"is_visible"` // 是否可见（可选）
 }
 
+// Register 注册提示相关的路由。
+// 管理员路由：
+//   - POST /api/v1/admin/challenges/{id}/hints（创建提示）
+//   - PUT /api/v1/admin/hints/{id}（更新提示）
+//   - DELETE /api/v1/admin/hints/{id}（删除提示）
+//
+// 用户路由：
+//   - GET /api/v1/challenges/{id}/hints（查看可见提示）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	p.db = db
 	r.With(auth.Authenticate, auth.RequireAdmin).Post("/api/v1/admin/challenges/{id}/hints", p.create)
@@ -39,22 +56,27 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	r.With(auth.Authenticate).Get("/api/v1/challenges/{id}/hints", p.list)
 }
 
+// create 处理创建提示的请求（管理员）。
+// 验证题目 ID 格式和提示内容，插入数据库。
 func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 	chalID := chi.URLParam(r, "id")
+	// 验证题目 ID 格式（32 字符 UUID）
 	if len(chalID) != 32 {
 		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
 		return
 	}
 
 	var req createReq
+	// 验证内容非空且不超过 4096 字符
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" || len(req.Content) > 4096 {
 		http.Error(w, `{"error":"content is required (max 4096 chars)"}`, http.StatusBadRequest)
 		return
 	}
 
+	// 插入提示记录，默认不可见
 	_, err := p.db.ExecContext(r.Context(),
 		`INSERT INTO hints (res_id, challenge_id, content) VALUES (?, ?, ?)`,
-		snowflake.Next(), chalID, req.Content)
+		uuid.Next(), chalID, req.Content)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
@@ -63,6 +85,9 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+// update 处理更新提示的请求（管理员）。
+// 使用合并策略：只更新请求中提供的字段，未提供的保持不变。
+// 支持更新 content 和 is_visible 两个字段。
 func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 	hintID := chi.URLParam(r, "id")
 	if len(hintID) != 32 {
@@ -76,13 +101,13 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate content if provided
+	// 验证内容长度（如果提供了的话）
 	if req.Content != nil && (len(*req.Content) == 0 || len(*req.Content) > 4096) {
 		http.Error(w, `{"error":"content must be 1-4096 chars"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Get current values first
+	// 获取当前值用于合并
 	var currentContent string
 	var currentIsVisible bool
 	err := p.db.QueryRowContext(r.Context(),
@@ -97,7 +122,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine new values
+	// 确定新值：未提供的字段保持原值
 	newContent := currentContent
 	if req.Content != nil {
 		newContent = *req.Content
@@ -107,7 +132,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 		newIsVisible = *req.IsVisible
 	}
 
-	// Update
+	// 执行更新
 	_, err = p.db.ExecContext(r.Context(),
 		`UPDATE hints SET content = ?, is_visible = ? WHERE res_id = ? AND is_deleted = 0`,
 		newContent, newIsVisible, hintID)
@@ -119,6 +144,9 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// delete 处理删除提示的请求（管理员）。
+// 使用软删除，将 is_deleted 设为 1。
+// 如果提示不存在返回 404。
 func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 	hintID := chi.URLParam(r, "id")
 	if len(hintID) != 32 {
@@ -126,6 +154,7 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 软删除提示
 	result, err := p.db.ExecContext(r.Context(),
 		`UPDATE hints SET is_deleted = 1 WHERE res_id = ? AND is_deleted = 0`, hintID)
 	if err != nil {
@@ -133,6 +162,7 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 检查是否有记录被删除
 	rows, err := result.RowsAffected()
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -146,6 +176,8 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// list 处理获取题目可见提示列表的请求。
+// 只返回 is_visible = 1 且未删除的提示，按创建时间升序排列。
 func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	chalID := chi.URLParam(r, "id")
 	if len(chalID) != 32 {
@@ -153,6 +185,7 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 查询可见且未删除的提示
 	rows, err := p.db.QueryContext(r.Context(),
 		`SELECT res_id, content, created_at FROM hints
 		 WHERE challenge_id = ? AND is_visible = 1 AND is_deleted = 0
@@ -173,6 +206,7 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 		hints = append(hints, h)
 	}
 
+	// 确保空列表返回 [] 而非 null
 	if hints == nil {
 		hints = []hint{}
 	}
