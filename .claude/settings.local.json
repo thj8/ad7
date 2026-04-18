@@ -46,7 +46,9 @@
       "WebSearch",
       "Bash(rtk go:*)",
       "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l\\).get\\(''''Test'''',''''''''\\),json.loads\\(l\\).get\\(''''Action'''',''''''''\\)\\) for l in sys.stdin if json.loads\\(l\\).get\\(''''Action''''\\) in \\(''''pass'''',''''fail''''\\)]\")",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(gh pr:*)",
+      "Bash(git branch:*)"
     ]
   }
 }
