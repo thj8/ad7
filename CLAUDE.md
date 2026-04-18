@@ -62,7 +62,6 @@ mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 **插件系统**：插件实现 `Plugin` 接口并在 `main.go` 中注册自己的 chi 路由。它们接收 `*sql.DB` 和 `*middleware.Auth` 用于直接数据库访问和路由保护。
 **无外键**：根据项目约束，数据库不使用外键约束。
 **输入验证**：字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）。`parseID` 在无效输入时返回 400。通知 `message` 是必填的。
-**Model基类**: 所有model都要基于BaseModel,具有id，res_id, created_at, updated_at, is_deleted.
 
 ## 集成测试
 
@@ -79,5 +78,7 @@ mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 每个测试调用 `cleanup(t)`，按依赖顺序删除所有表中的数据。
 
 ## 约束
-- 每次添加新功能，都必须添加完整的测试用例
-- 改一个bug，要写一个测试用例，保证此bug不会再次发生
+- **新功能**: 每次添加新功能，都必须添加完整的测试用例
+- **bug**: 改一个bug，要写一个测试用例，保证此bug不会再次发生
+- **Model基类**: 所有model都要基于BaseModel,具有id，res_id, created_at, updated_at, is_deleted.
+- **函数参数**： 所有函数参数不能多于4个，采用结构体封装

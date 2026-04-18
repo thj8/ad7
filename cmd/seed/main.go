@@ -1,3 +1,6 @@
+// Package main 是测试数据填充工具的入口。
+// 用于生成逼真的 CTF 比赛测试数据：15 个比赛、50 道题目、每个比赛 30 个用户。
+// 用户解题率差异化（顶部用户 72%），制造排行榜并列效果。
 package main
 
 import (
@@ -11,20 +14,20 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
-	"ad7/internal/snowflake"
+	"ad7/internal/uuid"
 )
 
 const (
-	numComps     = 15
-	poolSize     = 50
-	chalsPerComp = 25
-	usersPerComp = 30
+	numComps     = 15  // 生成的比赛数量
+	poolSize     = 50  // 题目池大小
+	chalsPerComp = 25  // 每个比赛分配的题目数量
+	usersPerComp = 30  // 每个比赛的模拟用户数量
 )
 
-// solveCounts[i] = correct solves for user i (0 = best).
-// User 0 → 18/25 = 72%; User 29 → 1/25 = 4%.
-// Deliberate ties at lower ranks create realistic leaderboard dynamics
-// while varied challenge scores differentiate tied solve-counts.
+// solveCounts 定义每个用户的正确解题数。
+// solveCounts[i] 表示第 i 个用户（0=最强）的正确解题数。
+// User 0 → 18/25 = 72%；User 29 → 1/25 = 4%。
+// 低排名处故意制造并列，模拟真实的排行榜动态。
 var solveCounts = [30]int{
 	18, 16, 15, 14, 13, 12, 11, 10, 9, 8,
 	7, 7, 6, 6, 5, 5, 4, 4, 3, 3,
@@ -32,9 +35,12 @@ var solveCounts = [30]int{
 }
 
 var (
+	// categories 是题目分类列表，循环分配给题目
 	categories = []string{"web", "pwn", "reverse", "crypto", "misc"}
+	// scores 是题目分值列表，循环分配给题目
 	scores     = []int{100, 150, 200, 250, 300, 350, 400, 450, 500}
 
+	// compTitles 是 15 个比赛的标题
 	compTitles = []string{
 		"2026 春季网络安全挑战赛",
 		"第四届全国大学生信息安全竞赛",
@@ -53,6 +59,7 @@ var (
 		"零信任架构安全挑战赛",
 	}
 
+	// compDescs 是 15 个比赛的描述
 	compDescs = []string{
 		"汇聚全国顶尖黑客，共赴春季安全盛宴",
 		"提升大学生网络安全意识与实战能力",
@@ -71,6 +78,7 @@ var (
 		"零信任架构下的安全挑战与解决方案",
 	}
 
+	// chalTemplates 是各分类下的英文题目模板
 	chalTemplates = map[string][]struct {
 		title string
 		desc  string
@@ -138,6 +146,7 @@ var (
 		},
 	}
 
+	// chalCN 是中文题目模板，约 3 道题目使用中文
 	chalCN = []struct {
 		title string
 		desc  string
@@ -148,10 +157,12 @@ var (
 		{"杂项签到题", "欢迎参加比赛！", "flag{w3lc0m3_t0_ctf_2026}"},
 	}
 
-	chalCats []string
-	chalIdx  map[string]int
+	chalCats []string       // 题目分类分配列表
+	chalIdx  map[string]int // 每个分类已使用的模板索引计数器
 )
 
+// dsn 返回数据库连接字符串。
+// 优先使用 TEST_DSN 环境变量，如果未设置则使用默认值。
 func dsn() string {
 	if d := os.Getenv("TEST_DSN"); d != "" {
 		return d
@@ -159,13 +170,22 @@ func dsn() string {
 	return "root:asfdsfedarjeiowvgfsd@tcp(192.168.5.44:3306)/ctf?parseTime=true"
 }
 
+// main 是种子数据生成工具的入口。
+// 执行流程：
+//  1. 解析命令行参数（-clean 控制是否先清除现有数据）
+//  2. 初始化随机数生成器和分类计数器
+//  3. 连接数据库
+//  4. 可选地清除现有数据
+//  5. 创建 50 道题目
+//  6. 循环创建 15 个比赛，每个比赛分配题目并生成提交记录
 func main() {
 	clean := flag.Bool("clean", true, "delete all rows before seeding")
 	flag.Parse()
 
+	// 使用当前时间作为随机种子
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	// Initialize challenge category counters
+	// 初始化题目分类计数器，按循环方式分配分类
 	chalCats = make([]string, 0, poolSize)
 	chalIdx = make(map[string]int)
 	for i := 0; i < poolSize; i++ {
@@ -173,6 +193,7 @@ func main() {
 		chalCats = append(chalCats, cat)
 	}
 
+	// 连接数据库
 	db, err := sql.Open("mysql", dsn())
 	if err != nil {
 		log.Fatal(err)
@@ -182,22 +203,30 @@ func main() {
 		log.Fatalf("ping: %v", err)
 	}
 
+	// 可选清除现有数据
 	if *clean {
 		cleanAll(db)
 		log.Println("cleaned existing data")
 	}
 
-	// 1. Create a pool of 50 challenges with varied scores & categories.
+	// 第一步：创建 50 道题目的题库
 	chalIDs := createChallenges(db)
 	log.Printf("created %d challenges", len(chalIDs))
 
-	// 2. Create 15 competitions + assign challenges + generate submissions.
+	// 第二步：创建 15 个比赛，分配题目并生成提交记录
 	now := time.Now()
 	for i := 0; i < numComps; i++ {
 		compID, start, end := createComp(db, i, now)
 		picked := pickN(rng, chalIDs, chalsPerComp)
 		assignChals(db, compID, picked)
-		genSubmissions(db, rng, compID, picked, start, end)
+		genSubmissions(&genSubmissionsConfig{
+			DB:        db,
+			RNG:       rng,
+			CompID:    compID,
+			ChalIDs:   picked,
+			CompStart: start,
+			CompEnd:   end,
+		})
 		log.Printf("competition %02d  id=%s  %s ~ %s  done", i+1, compID,
 			start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04"))
 	}
@@ -205,8 +234,11 @@ func main() {
 	log.Println("seed complete!")
 }
 
-// ── helpers ──
+// ── 辅助函数 ──
 
+// cleanAll 按依赖顺序清除所有表中的数据。
+// 先清除有依赖关系的表（competition_challenges, notifications），
+// 再清除主数据表（submissions, competitions, challenges）。
 func cleanAll(db *sql.DB) {
 	for _, t := range []string{
 		"competition_challenges", "notifications",
@@ -216,17 +248,21 @@ func cleanAll(db *sql.DB) {
 	}
 }
 
+// createChallenges 创建一个包含 50 道题目的题库。
+// 题目按分类循环分配，分值也循环分配。
+// 约 3 道题目使用中文模板，其余使用英文模板。
+// 返回所有题目的 res_id 列表。
 func createChallenges(db *sql.DB) []string {
 	ids := make([]string, poolSize)
-	cnCount := 0 // Track Chinese challenges (limit to ~3)
+	cnCount := 0 // 中文题目计数器（限制约 3 道）
 	for i := range ids {
-		rid := snowflake.Next()
+		rid := uuid.Next()
 		cat := categories[i%len(categories)]
 		sc := scores[i%len(scores)]
 
 		var title, desc, flag string
 
-		// Use Chinese for ~3 challenges, rest English
+		// 约每 17 道使用一道中文题目，最多 3 道
 		if cnCount < 3 && i%17 == 0 {
 			t := chalCN[cnCount%len(chalCN)]
 			title = t.title
@@ -234,6 +270,7 @@ func createChallenges(db *sql.DB) []string {
 			flag = t.flag
 			cnCount++
 		} else {
+			// 从对应分类的模板中按索引选取
 			templates := chalTemplates[cat]
 			idx := chalIdx[cat]
 			t := templates[idx%len(templates)]
@@ -254,18 +291,21 @@ func createChallenges(db *sql.DB) []string {
 	return ids
 }
 
+// createComp 创建单个比赛。
+// 根据 idx 决定比赛时间是过去（0-4）、当前（5-9）还是未来（10-14）。
+// 返回比赛的 res_id、开始时间和结束时间。
 func createComp(db *sql.DB, idx int, now time.Time) (string, time.Time, time.Time) {
-	rid := snowflake.Next()
+	rid := uuid.Next()
 
 	var start, end time.Time
 	switch {
-	case idx < 5: // past
+	case idx < 5: // 过去的比赛：从现在往前推 (idx+1) 周，持续 48 小时
 		start = now.AddDate(0, 0, -(idx+1)*7)
 		end = start.Add(48 * time.Hour)
-	case idx < 10: // current
+	case idx < 10: // 当前进行中的比赛：前后浮动，持续 72 小时
 		start = now.Add(time.Duration(idx-7) * 24 * time.Hour)
 		end = start.Add(72 * time.Hour)
-	default: // future
+	default: // 未来的比赛：从现在往后推 (idx-9) 周，持续 48 小时
 		start = now.AddDate(0, 0, (idx-9)*7)
 		end = start.Add(48 * time.Hour)
 	}
@@ -282,6 +322,8 @@ func createComp(db *sql.DB, idx int, now time.Time) (string, time.Time, time.Tim
 	return rid, start, end
 }
 
+// pickN 从 ID 列表中随机选取 n 个不重复的元素。
+// 先复制列表，再随机洗牌，取前 n 个。
 func pickN(rng *rand.Rand, ids []string, n int) []string {
 	s := make([]string, len(ids))
 	copy(s, ids)
@@ -289,9 +331,11 @@ func pickN(rng *rand.Rand, ids []string, n int) []string {
 	return s[:n]
 }
 
+// assignChals 将选中的题目分配到比赛中。
+// 为每个分配创建一条 competition_challenges 关联记录。
 func assignChals(db *sql.DB, compID string, chalIDs []string) {
 	for _, cid := range chalIDs {
-		rid := snowflake.Next()
+		rid := uuid.Next()
 		_, err := db.Exec(`INSERT INTO competition_challenges
 			(res_id, competition_id, challenge_id) VALUES (?, ?, ?)`,
 			rid, compID, cid)
@@ -299,48 +343,76 @@ func assignChals(db *sql.DB, compID string, chalIDs []string) {
 	}
 }
 
-func genSubmissions(db *sql.DB, rng *rand.Rand, compID string, chalIDs []string, compStart, compEnd time.Time) {
-	dur := compEnd.Sub(compStart)
+// genSubmissionsConfig 是生成提交记录的配置参数。
+type genSubmissionsConfig struct {
+	DB        *sql.DB
+	RNG       *rand.Rand
+	CompID    string
+	ChalIDs   []string
+	CompStart time.Time
+	CompEnd   time.Time
+}
+
+// genSubmissions 为比赛中的所有用户生成提交记录。
+// 根据预定义的 solveCounts 决定每个用户解对多少题。
+// 高排名用户更早开始解题（用于 last_solve_time 排名并列判定）。
+// 30% 概率在正确提交前生成一个错误尝试。
+func genSubmissions(cfg *genSubmissionsConfig) {
+	dur := cfg.CompEnd.Sub(cfg.CompStart)
 
 	for u := 0; u < usersPerComp; u++ {
 		userID := fmt.Sprintf("player_%03d", u+1)
 		nCorrect := solveCounts[u]
 
-		// Pick which challenges this user solves.
-		picked := make([]string, len(chalIDs))
-		copy(picked, chalIDs)
-		rng.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
+		// 随机选择该用户解对的题目
+		picked := make([]string, len(cfg.ChalIDs))
+		copy(picked, cfg.ChalIDs)
+		cfg.RNG.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
 
-		correct := picked[:nCorrect]
-		rest := picked[nCorrect:]
+		correct := picked[:nCorrect] // 解对的题目
+		rest := picked[nCorrect:]    // 未解对的题目
 
-		// Higher-ranked users start solving earlier (for tiebreak by last_solve_time).
-		userBase := compStart.Add(dur / time.Duration(usersPerComp+1) * time.Duration(u))
-		step := (compEnd.Sub(userBase)) / time.Duration(nCorrect+1)
+		// 高排名用户更早开始解题（影响排行榜 last_solve_time 排序）
+		userBase := cfg.CompStart.Add(dur / time.Duration(usersPerComp+1) * time.Duration(u))
+		step := (cfg.CompEnd.Sub(userBase)) / time.Duration(nCorrect+1)
 
+		// 生成正确提交记录
 		for j, cid := range correct {
 			t := userBase.Add(step * time.Duration(j+1))
-			// 30% chance of a prior wrong attempt
-			if rng.Float64() < 0.3 {
-				insertSub(db, userID, cid, compID, false, t.Add(-2*time.Minute))
+			// 30% 概率在正确提交前有一次错误尝试
+			if cfg.RNG.Float64() < 0.3 {
+				insertSub(cfg.DB, userID, cid, cfg.CompID, false, t.Add(-2*time.Minute))
 			}
-			insertSub(db, userID, cid, compID, true, t)
+			insertSub(cfg.DB, userID, cid, cfg.CompID, true, t)
 		}
 
-		// 0-2 wrong attempts on unsolved challenges
-		for j := 0; j < rng.Intn(3) && j < len(rest); j++ {
-			t := compStart.Add(dur / time.Duration(u+2) * time.Duration(j+1))
-			insertSub(db, userID, rest[j], compID, false, t)
+		// 在未解对的题目上生成 0-2 次错误尝试
+		for j := 0; j < cfg.RNG.Intn(3) && j < len(rest); j++ {
+			t := cfg.CompStart.Add(dur / time.Duration(u+2) * time.Duration(j+1))
+			insertSub(cfg.DB, userID, rest[j], cfg.CompID, false, t)
 		}
 	}
 }
 
-func insertSub(db *sql.DB, userID string, chalID, compID string, correct bool, t time.Time) {
+// insertSubRequest 是插入提交记录的参数。
+type insertSubRequest struct {
+	DB      *sql.DB
+	UserID  string
+	ChalID  string
+	CompID  string
+	Correct bool
+	Time    time.Time
+}
+
+// insertSub 插入一条提交记录。
+// 参数 correct 为 true 时表示正确提交，flag 记录为 "flag{correct}"；
+// 否则记录为错误提交，flag 记录为 "flag{wrong_attempt}"。
+func insertSub(db *sql.DB, userID, chalID, compID string, correct bool, t time.Time) {
 	flag := "flag{wrong_attempt}"
 	if correct {
 		flag = "flag{correct}"
 	}
-	rid := snowflake.Next()
+	rid := uuid.Next()
 	_, err := db.Exec(`INSERT INTO submissions
 		(res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -348,6 +420,7 @@ func insertSub(db *sql.DB, userID string, chalID, compID string, correct bool, t
 	must(err, "insert submission")
 }
 
+// must 是简单的错误检查辅助函数，如果错误非 nil 则 log.Fatalf 退出程序。
 func must(err error, msg string, args ...any) {
 	if err != nil {
 		log.Fatalf(msg+": %v", append(args, err)...)
