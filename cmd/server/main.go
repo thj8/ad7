@@ -20,6 +20,7 @@ import (
 	"ad7/plugins/hints"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
+	"ad7/plugins/topthree"
 )
 
 func main() {
@@ -85,6 +86,7 @@ func main() {
 		analytics.New(),
 		dashboard.New(),
 		hints.New(),
+		topthree.New(),
 	}
 	for _, p := range plugins {
 		p.Register(r, st.DB(), auth)
