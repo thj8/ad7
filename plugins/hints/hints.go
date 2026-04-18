@@ -86,7 +86,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 	var currentContent string
 	var currentIsVisible bool
 	err := p.db.QueryRowContext(r.Context(),
-		`SELECT content, is_visible FROM hints WHERE res_id = ?`, hintID).
+		`SELECT content, is_visible FROM hints WHERE res_id = ? AND is_deleted = 0`, hintID).
 		Scan(&currentContent, &currentIsVisible)
 	if err == sql.ErrNoRows {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -109,7 +109,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 
 	// Update
 	_, err = p.db.ExecContext(r.Context(),
-		`UPDATE hints SET content = ?, is_visible = ? WHERE res_id = ?`,
+		`UPDATE hints SET content = ?, is_visible = ? WHERE res_id = ? AND is_deleted = 0`,
 		newContent, newIsVisible, hintID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -127,7 +127,7 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := p.db.ExecContext(r.Context(),
-		`DELETE FROM hints WHERE res_id = ?`, hintID)
+		`UPDATE hints SET is_deleted = 1 WHERE res_id = ? AND is_deleted = 0`, hintID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
@@ -155,7 +155,7 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := p.db.QueryContext(r.Context(),
 		`SELECT res_id, content, created_at FROM hints
-		 WHERE challenge_id = ? AND is_visible = 1
+		 WHERE challenge_id = ? AND is_visible = 1 AND is_deleted = 0
 		 ORDER BY created_at ASC`, chalID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)

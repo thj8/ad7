@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS submissions (
     competition_id VARCHAR(32)  NULL,
     submitted_flag VARCHAR(255) NOT NULL,
     is_correct     TINYINT(1)   NOT NULL,
+    is_deleted     TINYINT(1)   NOT NULL DEFAULT 0,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_user_challenge (user_id, challenge_id)
 );
 
@@ -33,7 +35,9 @@ CREATE TABLE IF NOT EXISTS notifications (
     competition_id VARCHAR(32)  NOT NULL,
     title          VARCHAR(255) NOT NULL,
     message        TEXT         NOT NULL,
-    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    is_deleted     TINYINT(1)   NOT NULL DEFAULT 0,
+    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS competitions (
@@ -63,5 +67,7 @@ CREATE TABLE IF NOT EXISTS hints (
     challenge_id VARCHAR(32) NOT NULL,
     content     TEXT         NOT NULL,
     is_visible  TINYINT(1)   NOT NULL DEFAULT 1,
-    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    is_deleted  TINYINT(1)   NOT NULL DEFAULT 0,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

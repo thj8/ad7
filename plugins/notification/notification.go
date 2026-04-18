@@ -32,7 +32,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	rows, err := p.db.QueryContext(r.Context(), `
 		SELECT res_id, competition_id, title, message, created_at
 		FROM notifications
-		WHERE competition_id = ?
+		WHERE competition_id = ? AND is_deleted = 0
 		ORDER BY created_at DESC`, compID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)

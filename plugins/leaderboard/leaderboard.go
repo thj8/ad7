@@ -33,7 +33,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		SELECT s.user_id, SUM(c.score), MAX(s.created_at)
 		FROM submissions s
 		JOIN challenges c ON c.res_id = s.challenge_id
-		WHERE s.is_correct = 1 AND s.competition_id = ?
+		WHERE s.is_correct = 1 AND s.competition_id = ? AND s.is_deleted = 0 AND c.is_deleted = 0
 		GROUP BY s.user_id
 		ORDER BY SUM(c.score) DESC, MAX(s.created_at) ASC`, compID)
 	if err != nil {
