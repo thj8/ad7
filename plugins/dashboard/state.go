@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func (p *Plugin) getCompetitionState(ctx context.Context, compID int64) (*stateResponse, error) {
+func (p *Plugin) getCompetitionState(ctx context.Context, compID string) (*stateResponse, error) {
 	resp := &stateResponse{}
 
 	// 1. 获取比赛信息
@@ -42,7 +42,7 @@ func (p *Plugin) getCompetitionState(ctx context.Context, compID int64) (*stateR
 	return resp, nil
 }
 
-func (p *Plugin) getCompetitionInfo(ctx context.Context, compID int64) (*competitionInfo, error) {
+func (p *Plugin) getCompetitionInfo(ctx context.Context, compID string) (*competitionInfo, error) {
 	var info competitionInfo
 	err := p.db.QueryRowContext(ctx, `
 		SELECT res_id, title, is_active, start_time, end_time
@@ -54,7 +54,7 @@ func (p *Plugin) getCompetitionInfo(ctx context.Context, compID int64) (*competi
 	return &info, nil
 }
 
-func (p *Plugin) getChallengeStates(ctx context.Context, compID int64) ([]challengeState, error) {
+func (p *Plugin) getChallengeStates(ctx context.Context, compID string) ([]challengeState, error) {
 	// 先获取比赛关联的题目
 	challengeRows, err := p.db.QueryContext(ctx, `
 		SELECT c.res_id, c.title, c.category, c.score
@@ -67,7 +67,7 @@ func (p *Plugin) getChallengeStates(ctx context.Context, compID int64) ([]challe
 	defer challengeRows.Close()
 
 	var challenges []challengeState
-	challengeMap := make(map[int64]*challengeState)
+	challengeMap := make(map[string]*challengeState)
 	for challengeRows.Next() {
 		var cs challengeState
 		if err := challengeRows.Scan(&cs.ID, &cs.Title, &cs.Category, &cs.Score); err != nil {
@@ -89,7 +89,7 @@ func (p *Plugin) getChallengeStates(ctx context.Context, compID int64) ([]challe
 	defer solveRows.Close()
 
 	for solveRows.Next() {
-		var chalID int64
+		var chalID string
 		var count int
 		if err := solveRows.Scan(&chalID, &count); err != nil {
 			return nil, err
@@ -109,7 +109,7 @@ func (p *Plugin) getChallengeStates(ctx context.Context, compID int64) ([]challe
 	defer fbRows.Close()
 
 	for fbRows.Next() {
-		var chalID int64
+		var chalID string
 		var userID string
 		var createdAt time.Time
 		if err := fbRows.Scan(&chalID, &userID, &createdAt); err != nil {
@@ -126,7 +126,7 @@ func (p *Plugin) getChallengeStates(ctx context.Context, compID int64) ([]challe
 	return challenges, nil
 }
 
-func (p *Plugin) getLeaderboard(ctx context.Context, compID int64) ([]leaderboardEntry, error) {
+func (p *Plugin) getLeaderboard(ctx context.Context, compID string) ([]leaderboardEntry, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT s.user_id, SUM(c.score), MAX(s.created_at)
 		FROM submissions s
@@ -156,7 +156,7 @@ func (p *Plugin) getLeaderboard(ctx context.Context, compID int64) ([]leaderboar
 	return board, nil
 }
 
-func (p *Plugin) getStats(ctx context.Context, compID int64) (*stats, error) {
+func (p *Plugin) getStats(ctx context.Context, compID string) (*stats, error) {
 	var s stats
 	s.SolvesByCategory = make(map[string]int)
 
@@ -202,13 +202,13 @@ func (p *Plugin) getStats(ctx context.Context, compID int64) (*stats, error) {
 	return &s, nil
 }
 
-func (p *Plugin) getRecentEventsForComp(compID int64) []recentEvent {
+func (p *Plugin) getRecentEventsForComp(compID string) []recentEvent {
 	allEvents := p.getRecentEvents()
 	// 这里简化处理，实际可以更精确过滤
 	return allEvents
 }
 
-func (p *Plugin) getFirstBloodList(ctx context.Context, compID int64) ([]firstBlood, error) {
+func (p *Plugin) getFirstBloodList(ctx context.Context, compID string) ([]firstBlood, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT fb.res_id, fb.challenge_id, fb.user_id, fb.created_at,
 		       c.title, c.category, c.score

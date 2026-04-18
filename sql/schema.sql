@@ -3,7 +3,7 @@ USE ctf;
 
 CREATE TABLE IF NOT EXISTS challenges (
     id          INT AUTO_INCREMENT PRIMARY KEY,
-    res_id      BIGINT       NOT NULL UNIQUE,
+    res_id      VARCHAR(32)  NOT NULL UNIQUE,
     title       VARCHAR(255) NOT NULL,
     category    VARCHAR(64)  NOT NULL DEFAULT 'misc',
     description TEXT         NOT NULL,
@@ -17,10 +17,10 @@ CREATE TABLE IF NOT EXISTS challenges (
 
 CREATE TABLE IF NOT EXISTS submissions (
     id             INT AUTO_INCREMENT PRIMARY KEY,
-    res_id         BIGINT       NOT NULL UNIQUE,
+    res_id         VARCHAR(32)  NOT NULL UNIQUE,
     user_id        VARCHAR(128) NOT NULL,
-    challenge_id   BIGINT       NOT NULL,
-    competition_id BIGINT       NULL,
+    challenge_id   VARCHAR(32)  NOT NULL,
+    competition_id VARCHAR(32)  NULL,
     submitted_flag VARCHAR(255) NOT NULL,
     is_correct     TINYINT(1)   NOT NULL,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS submissions (
 
 CREATE TABLE IF NOT EXISTS notifications (
     id             INT AUTO_INCREMENT PRIMARY KEY,
-    res_id         BIGINT       NOT NULL UNIQUE,
-    competition_id BIGINT       NOT NULL,
+    res_id         VARCHAR(32)  NOT NULL UNIQUE,
+    competition_id VARCHAR(32)  NOT NULL,
     title          VARCHAR(255) NOT NULL,
     message        TEXT         NOT NULL,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE TABLE IF NOT EXISTS competitions (
     id          INT AUTO_INCREMENT PRIMARY KEY,
-    res_id      BIGINT       NOT NULL UNIQUE,
+    res_id      VARCHAR(32)  NOT NULL UNIQUE,
     title       VARCHAR(255) NOT NULL,
     description VARCHAR(4096) NOT NULL DEFAULT '',
     start_time  DATETIME     NOT NULL,
@@ -51,16 +51,16 @@ CREATE TABLE IF NOT EXISTS competitions (
 
 CREATE TABLE IF NOT EXISTS competition_challenges (
     id             INT AUTO_INCREMENT PRIMARY KEY,
-    res_id         BIGINT NOT NULL UNIQUE,
-    competition_id BIGINT NOT NULL,
-    challenge_id   BIGINT NOT NULL,
+    res_id         VARCHAR(32) NOT NULL UNIQUE,
+    competition_id VARCHAR(32) NOT NULL,
+    challenge_id   VARCHAR(32) NOT NULL,
     UNIQUE INDEX idx_comp_chal (competition_id, challenge_id)
 );
 
 CREATE TABLE IF NOT EXISTS hints (
     id          INT AUTO_INCREMENT PRIMARY KEY,
-    res_id      BIGINT       NOT NULL UNIQUE,
-    challenge_id BIGINT      NOT NULL,
+    res_id      VARCHAR(32)  NOT NULL UNIQUE,
+    challenge_id VARCHAR(32) NOT NULL,
     content     TEXT         NOT NULL,
     is_visible  TINYINT(1)   NOT NULL DEFAULT 1,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP

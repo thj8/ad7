@@ -22,7 +22,7 @@ func (s *ChallengeService) List(ctx context.Context) ([]model.Challenge, error) 
 	return s.store.ListEnabled(ctx)
 }
 
-func (s *ChallengeService) Get(ctx context.Context, resID int64) (*model.Challenge, error) {
+func (s *ChallengeService) Get(ctx context.Context, resID string) (*model.Challenge, error) {
 	c, err := s.store.GetEnabledByID(ctx, resID)
 	if err != nil {
 		return nil, err
@@ -33,9 +33,9 @@ func (s *ChallengeService) Get(ctx context.Context, resID int64) (*model.Challen
 	return c, nil
 }
 
-func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (int64, error) {
+func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (string, error) {
 	if c.Title == "" || c.Flag == "" {
-		return 0, errors.New("title and flag are required")
+		return "", errors.New("title and flag are required")
 	}
 	if c.Score <= 0 {
 		c.Score = 100
@@ -47,7 +47,7 @@ func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (int6
 	return s.store.Create(ctx, c)
 }
 
-func (s *ChallengeService) Update(ctx context.Context, resID int64, patch *model.Challenge) error {
+func (s *ChallengeService) Update(ctx context.Context, resID string, patch *model.Challenge) error {
 	existing, err := s.store.GetByID(ctx, resID)
 	if err != nil {
 		return err
@@ -74,6 +74,6 @@ func (s *ChallengeService) Update(ctx context.Context, resID int64, patch *model
 	return s.store.Update(ctx, existing)
 }
 
-func (s *ChallengeService) Delete(ctx context.Context, resID int64) error {
+func (s *ChallengeService) Delete(ctx context.Context, resID string) error {
 	return s.store.Delete(ctx, resID)
 }

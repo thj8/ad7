@@ -25,7 +25,7 @@ func NewSubmissionService(c store.ChallengeStore, s store.SubmissionStore) *Subm
 	return &SubmissionService{challenges: c, submissions: s}
 }
 
-func (s *SubmissionService) Submit(ctx context.Context, userID string, challengeID int64, flag string) (SubmitResult, error) {
+func (s *SubmissionService) Submit(ctx context.Context, userID string, challengeID string, flag string) (SubmitResult, error) {
 	solved, err := s.submissions.HasCorrectSubmission(ctx, userID, challengeID)
 	if err != nil {
 		return "", err
@@ -53,12 +53,11 @@ func (s *SubmissionService) Submit(ctx context.Context, userID string, challenge
 	}
 
 	if isCorrect {
-		var zeroID int64 = 0
 		event.Publish(event.Event{
 			Type:          event.EventCorrectSubmission,
 			UserID:        userID,
 			ChallengeID:   challengeID,
-			CompetitionID: &zeroID,
+			CompetitionID: nil,
 			Ctx:           ctx,
 		})
 		return ResultCorrect, nil
@@ -66,11 +65,11 @@ func (s *SubmissionService) Submit(ctx context.Context, userID string, challenge
 	return ResultIncorrect, nil
 }
 
-func (s *SubmissionService) List(ctx context.Context, userID string, challengeID int64) ([]model.Submission, error) {
+func (s *SubmissionService) List(ctx context.Context, userID string, challengeID string) ([]model.Submission, error) {
 	return s.submissions.ListSubmissions(ctx, userID, challengeID)
 }
 
-func (s *SubmissionService) SubmitInComp(ctx context.Context, userID string, competitionID, challengeID int64, flag string) (SubmitResult, error) {
+func (s *SubmissionService) SubmitInComp(ctx context.Context, userID string, competitionID, challengeID string, flag string) (SubmitResult, error) {
 	solved, err := s.submissions.HasCorrectSubmissionInComp(ctx, userID, challengeID, competitionID)
 	if err != nil {
 		return "", err
@@ -112,6 +111,6 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, userID string, com
 	return ResultIncorrect, nil
 }
 
-func (s *SubmissionService) ListByComp(ctx context.Context, competitionID int64, userID string, challengeID int64) ([]model.Submission, error) {
+func (s *SubmissionService) ListByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
 	return s.submissions.ListSubmissionsByComp(ctx, competitionID, userID, challengeID)
 }

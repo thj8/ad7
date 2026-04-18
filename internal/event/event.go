@@ -14,8 +14,8 @@ const (
 type Event struct {
 	Type          EventType
 	UserID        string
-	ChallengeID   int64
-	CompetitionID *int64 // 0 表示全局提交
+	ChallengeID   string
+	CompetitionID *string // nil 表示全局提交
 	Ctx           context.Context
 }
 

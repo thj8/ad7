@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -141,10 +140,10 @@ func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func parseID(r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, false
+func parseID(r *http.Request) (string, bool) {
+	id := chi.URLParam(r, "id")
+	if len(id) != 32 {
+		return "", false
 	}
 	return id, true
 }

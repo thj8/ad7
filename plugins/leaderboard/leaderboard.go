@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,7 +28,7 @@ type entry struct {
 }
 
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
-	compID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	compID := chi.URLParam(r, "id")
 	rows, err := p.db.QueryContext(r.Context(), `
 		SELECT s.user_id, SUM(c.score), MAX(s.created_at)
 		FROM submissions s

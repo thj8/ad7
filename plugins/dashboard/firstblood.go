@@ -11,7 +11,7 @@ import (
 
 func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	ctx := context.Background()
-	compID := int64(0)
+	compID := ""
 	if e.CompetitionID != nil {
 		compID = *e.CompetitionID
 	}
@@ -56,7 +56,7 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	p.addFirstBloodEvent(ctx, e.UserID, e.ChallengeID, compID, now)
 }
 
-func (p *Plugin) addFirstBloodEvent(ctx context.Context, userID string, challengeID, compID int64, t time.Time) {
+func (p *Plugin) addFirstBloodEvent(ctx context.Context, userID string, challengeID, compID string, t time.Time) {
 	// 获取题目标题
 	var title string
 	err := p.db.QueryRowContext(ctx, `
@@ -74,7 +74,7 @@ func (p *Plugin) addFirstBloodEvent(ctx context.Context, userID string, challeng
 	})
 }
 
-func (p *Plugin) addSolveEvent(ctx context.Context, userID string, challengeID, compID int64) {
+func (p *Plugin) addSolveEvent(ctx context.Context, userID string, challengeID, compID string) {
 	// 获取题目标题和分数
 	var title string
 	var score int

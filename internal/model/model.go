@@ -4,7 +4,7 @@ import "time"
 
 type Challenge struct {
 	ID          int       `json:"-"`
-	ResID       int64     `json:"id"`
+	ResID       string    `json:"id"`
 	Title       string    `json:"title"`
 	Category    string    `json:"category"`
 	Description string    `json:"description"`
@@ -17,10 +17,10 @@ type Challenge struct {
 
 type Submission struct {
 	ID            int       `json:"-"`
-	ResID         int64     `json:"id"`
+	ResID         string    `json:"id"`
 	UserID        string    `json:"user_id"`
-	ChallengeID   int64     `json:"challenge_id"`
-	CompetitionID *int64    `json:"competition_id"`
+	ChallengeID   string    `json:"challenge_id"`
+	CompetitionID *string   `json:"competition_id"`
 	SubmittedFlag string    `json:"submitted_flag"`
 	IsCorrect     bool      `json:"is_correct"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -28,8 +28,8 @@ type Submission struct {
 
 type Notification struct {
 	ID            int       `json:"-"`
-	ResID         int64     `json:"id"`
-	CompetitionID int64     `json:"competition_id"`
+	ResID         string    `json:"id"`
+	CompetitionID string    `json:"competition_id"`
 	Title         string    `json:"title"`
 	Message       string    `json:"message"`
 	CreatedAt     time.Time `json:"created_at"`
