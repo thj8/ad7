@@ -22,9 +22,9 @@ import (
 	"ad7/internal/service"
 	"ad7/internal/store"
 	"ad7/plugins/analytics"
+	"ad7/plugins/hints"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
-	"ad7/plugins/hints"
 	"ad7/plugins/topthree"
 )
 
@@ -630,6 +630,18 @@ func TestCompetitionLeaderboard(t *testing.T) {
 	first := board[0].(map[string]any)
 	if first["user_id"] != "user1" {
 		t.Fatalf("expected user1 at rank 1, got %v", first["user_id"])
+	}
+
+	// 验证逐题详情
+	chals, ok := first["challenges"].([]any)
+	if !ok || len(chals) != 2 {
+		t.Fatalf("expected 2 challenge results, got %v", first["challenges"])
+	}
+	for _, c := range chals {
+		cr := c.(map[string]any)
+		if cr["solved"] != true {
+			t.Errorf("expected solved=true for challenge %v", cr["challenge_id"])
+		}
 	}
 }
 
