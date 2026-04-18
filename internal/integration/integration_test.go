@@ -53,6 +53,18 @@ func TestMain(m *testing.M) {
 	}
 	testDB = st.DB()
 
+	// Create a test config with rate limit
+	cfg := &struct {
+		RateLimit struct {
+			Submission struct {
+				Requests int
+				Window   time.Duration
+			}
+		}
+	}{}
+	cfg.RateLimit.Submission.Requests = 3
+	cfg.RateLimit.Submission.Window = 10 * time.Second
+
 	auth := middleware.NewAuth(testSecret, adminRole)
 	challengeSvc := service.NewChallengeService(st)
 	submissionSvc := service.NewSubmissionService(st, st)
@@ -70,7 +82,12 @@ func TestMain(m *testing.M) {
 		r.Get("/competitions", compH.List)
 		r.Get("/competitions/{id}", compH.Get)
 		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
-		r.Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
+		r.With(
+			middleware.LimitByUserID(
+				cfg.RateLimit.Submission.Requests,
+				cfg.RateLimit.Submission.Window,
+			),
+		).Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Post("/challenges", challengeH.Create)
@@ -1092,4 +1109,46 @@ func TestTopThreeBaseModelSoftDelete(t *testing.T) {
 	if softDeletedCount != 1 {
 		t.Errorf("expected 1 soft-deleted record, got %d", softDeletedCount)
 	}
+}
+
+func TestSubmitFlagRateLimit(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("rateuser1", "user")
+
+	// Create competition + challenge + add to comp
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"CompRate","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	assertStatus(t, resp, 201)
+	compID := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", "/api/v1/admin/challenges",
+		`{"title":"ChalRate","description":"D","score":200,"flag":"flag{rate}"}`, adminTok)
+	assertStatus(t, resp, 201)
+	chalID := getID(t, decodeJSON(t, resp))
+
+	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	assertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	submitPath := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID)
+
+	// First 3 requests should succeed (rate limit is 3 per 10s)
+	for i := 0; i < 3; i++ {
+		resp = doRequest(t, "POST", submitPath, `{"flag":"wrong"}`, userTok)
+		assertStatus(t, resp, 200)
+		resp.Body.Close()
+	}
+
+	// 4th request should be rate limited (429)
+	resp = doRequest(t, "POST", submitPath, `{"flag":"wrong"}`, userTok)
+	assertStatus(t, resp, http.StatusTooManyRequests)
+	resp.Body.Close()
+
+	// Different user should still be able to submit
+	user2Tok := makeToken("rateuser2", "user")
+	resp = doRequest(t, "POST", submitPath, `{"flag":"wrong"}`, user2Tok)
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
 }
