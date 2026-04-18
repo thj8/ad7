@@ -60,7 +60,7 @@ func (p *Plugin) addFirstBloodEvent(ctx context.Context, userID string, challeng
 	// 获取题目标题
 	var title string
 	err := p.db.QueryRowContext(ctx, `
-		SELECT title FROM challenges WHERE res_id = ?`, challengeID).Scan(&title)
+		SELECT title FROM challenges WHERE res_id = ? AND is_deleted = 0`, challengeID).Scan(&title)
 	if err != nil {
 		title = "Unknown Challenge"
 	}
@@ -79,7 +79,7 @@ func (p *Plugin) addSolveEvent(ctx context.Context, userID string, challengeID, 
 	var title string
 	var score int
 	err := p.db.QueryRowContext(ctx, `
-		SELECT title, score FROM challenges WHERE res_id = ?`, challengeID).Scan(&title, &score)
+		SELECT title, score FROM challenges WHERE res_id = ? AND is_deleted = 0`, challengeID).Scan(&title, &score)
 	if err != nil {
 		title = "Unknown Challenge"
 		score = 0

@@ -81,7 +81,7 @@ func (p *Plugin) getChallengeStates(ctx context.Context, compID string) ([]chall
 	solveRows, err := p.db.QueryContext(ctx, `
 		SELECT s.challenge_id, COUNT(DISTINCT s.user_id)
 		FROM submissions s
-		WHERE s.competition_id = ? AND s.is_correct = 1
+		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0
 		GROUP BY s.challenge_id`, compID)
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (p *Plugin) getLeaderboard(ctx context.Context, compID string) ([]leaderboa
 		SELECT s.user_id, SUM(c.score), MAX(s.created_at)
 		FROM submissions s
 		JOIN challenges c ON c.res_id = s.challenge_id
-		WHERE s.is_correct = 1 AND s.competition_id = ?
+		WHERE s.is_correct = 1 AND s.competition_id = ? AND s.is_deleted = 0 AND c.is_deleted = 0
 		GROUP BY s.user_id
 		ORDER BY SUM(c.score) DESC, MAX(s.created_at) ASC`, compID)
 	if err != nil {
@@ -163,7 +163,7 @@ func (p *Plugin) getStats(ctx context.Context, compID string) (*stats, error) {
 	// 总解题数
 	err := p.db.QueryRowContext(ctx, `
 		SELECT COUNT(DISTINCT CONCAT(user_id, '-', challenge_id))
-		FROM submissions WHERE competition_id = ? AND is_correct = 1`, compID).
+		FROM submissions WHERE competition_id = ? AND is_correct = 1 AND is_deleted = 0`, compID).
 		Scan(&s.TotalSolves)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (p *Plugin) getStats(ctx context.Context, compID string) (*stats, error) {
 	// 总参赛用户数
 	err = p.db.QueryRowContext(ctx, `
 		SELECT COUNT(DISTINCT user_id)
-		FROM submissions WHERE competition_id = ?`, compID).
+		FROM submissions WHERE competition_id = ? AND is_deleted = 0`, compID).
 		Scan(&s.TotalUsers)
 	if err != nil {
 		s.TotalUsers = 0
@@ -183,7 +183,7 @@ func (p *Plugin) getStats(ctx context.Context, compID string) (*stats, error) {
 		SELECT c.category, COUNT(DISTINCT CONCAT(s.user_id, '-', s.challenge_id))
 		FROM submissions s
 		JOIN challenges c ON c.res_id = s.challenge_id
-		WHERE s.competition_id = ? AND s.is_correct = 1
+		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0 AND c.is_deleted = 0
 		GROUP BY c.category`, compID)
 	if err != nil {
 		return &s, nil
@@ -214,7 +214,7 @@ func (p *Plugin) getFirstBloodList(ctx context.Context, compID string) ([]firstB
 		       c.title, c.category, c.score
 		FROM dashboard_first_blood fb
 		JOIN challenges c ON c.res_id = fb.challenge_id
-		WHERE fb.competition_id = ?
+		WHERE fb.competition_id = ? AND c.is_deleted = 0
 		ORDER BY fb.created_at ASC`, compID)
 	if err != nil {
 		return nil, err

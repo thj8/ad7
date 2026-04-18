@@ -101,7 +101,7 @@ func (s *Store) Delete(ctx context.Context, resID string) error {
 func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1`,
+		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1 AND is_deleted=0`,
 		userID, challengeID).Scan(&count)
 	return count > 0, err
 }
@@ -115,7 +115,7 @@ func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) err
 }
 
 func (s *Store) ListSubmissions(ctx context.Context, userID string, challengeID string) ([]model.Submission, error) {
-	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE 1=1`
+	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE is_deleted=0`
 	args := []any{}
 	if userID != "" {
 		query += " AND user_id=?"
@@ -259,7 +259,7 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.
 func (s *Store) HasCorrectSubmissionInComp(ctx context.Context, userID string, challengeID, competitionID string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1`,
+		`SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1 AND is_deleted=0`,
 		userID, challengeID, competitionID).Scan(&count)
 	return count > 0, err
 }
@@ -273,7 +273,7 @@ func (s *Store) CreateSubmissionWithComp(ctx context.Context, sub *model.Submiss
 }
 
 func (s *Store) ListSubmissionsByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
-	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE competition_id=?`
+	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE competition_id=? AND is_deleted=0`
 	args := []any{competitionID}
 	if userID != "" {
 		query += " AND user_id=?"

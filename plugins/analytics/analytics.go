@@ -68,7 +68,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 
 	// Get total users who submitted
 	err = p.db.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ?
+		SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
 	`, compID).Scan(&resp.TotalUsers)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -78,7 +78,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	// Get total submissions and correct submissions
 	err = p.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
-		FROM submissions WHERE competition_id = ?
+		FROM submissions WHERE competition_id = ? AND is_deleted = 0
 	`, compID).Scan(&resp.TotalSubmissions, &resp.CorrectSubmissions)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -90,7 +90,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		var totalCorrectSolves int
 		err = p.db.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM submissions
-			WHERE competition_id = ? AND is_correct = 1
+			WHERE competition_id = ? AND is_correct = 1 AND is_deleted = 0
 			`, compID).Scan(&totalCorrectSolves)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -111,7 +111,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		SELECT AVG(TIMESTAMPDIFF(SECOND, c.start_time, s.created_at))
 		FROM submissions s
 		JOIN competitions c ON c.res_id = s.competition_id
-		WHERE s.competition_id = ? AND s.is_correct = 1
+		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0 AND c.is_deleted = 0
 	`, compID).Scan(&avgSolveTimeSec)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -141,7 +141,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		SELECT c.category, COUNT(DISTINCT cc.challenge_id) as total_challenges
 		FROM competition_challenges cc
 		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ?
+		WHERE cc.competition_id = ? AND c.is_deleted = 0
 		GROUP BY c.category
 	`, compID)
 	if err != nil {
@@ -165,7 +165,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			JOIN challenges c ON c.res_id = s.challenge_id
 			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
 			WHERE s.competition_id = ? AND cc.competition_id = ?
-			AND s.is_correct = 1 AND c.category = ?
+			AND s.is_correct = 1 AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
 			`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -175,7 +175,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		// Get total users in competition
 		var totalUsers int
 		err = p.db.QueryRowContext(ctx, `
-			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ?
+			SELECT COUNT(DISTINCT user_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0
 			`, compID).Scan(&totalUsers)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -194,7 +194,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 			JOIN challenges c ON c.res_id = s.challenge_id
 			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
 			WHERE s.competition_id = ? AND cc.competition_id = ?
-			AND c.category = ?
+			AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
 			`, compID, compID, cat.Category).Scan(&totalAttempts)
 		if err != nil {
 			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -248,8 +248,8 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 			MIN(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as first_solve,
 			MAX(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as last_solve
 		FROM submissions s
-		LEFT JOIN challenges c ON c.res_id = s.challenge_id
-		WHERE s.competition_id = ?
+		LEFT JOIN challenges c ON c.res_id = s.challenge_id AND c.is_deleted = 0
+		WHERE s.competition_id = ? AND s.is_deleted = 0
 		GROUP BY s.user_id
 		ORDER BY total_score DESC, first_solve ASC
 		`, compID)
@@ -328,7 +328,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 		SELECT c.res_id, c.title, c.category, c.score
 		FROM competition_challenges cc
 		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ?
+		WHERE cc.competition_id = ? AND c.is_deleted = 0
 		`, compID)
 	if err != nil {
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -353,7 +353,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 				COUNT(DISTINCT CASE WHEN is_correct = 1 THEN user_id ELSE NULL END),
 				MIN(CASE WHEN is_correct = 1 THEN created_at ELSE NULL END)
 			FROM submissions
-			WHERE competition_id = ? AND challenge_id = ?
+			WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
 			`, compID, cs.ChallengeID).Scan(
 			&cs.TotalSolves,
 			&cs.TotalAttempts,
@@ -383,7 +383,7 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 					MIN(created_at) as first_submit,
 					MIN(CASE WHEN is_correct = 1 THEN created_at ELSE NULL END) as correct_submit
 				FROM submissions
-				WHERE competition_id = ? AND challenge_id = ?
+				WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
 				GROUP BY user_id
 				HAVING correct_submit IS NOT NULL
 			) user_times
