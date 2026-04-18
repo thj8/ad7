@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
+	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
 )
 
@@ -57,28 +58,24 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 }
 
 // create 处理创建提示的请求（管理员）。
-// 验证题目 ID 格式和提示内容，插入数据库。
 func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 	chalID := chi.URLParam(r, "id")
-	// 验证题目 ID 格式（32 字符 UUID）
-	if len(chalID) != 32 {
-		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(chalID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid challenge id")
 		return
 	}
 
 	var req createReq
-	// 验证内容非空且不超过 4096 字符
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" || len(req.Content) > 4096 {
-		http.Error(w, `{"error":"content is required (max 4096 chars)"}`, http.StatusBadRequest)
+		pluginutil.WriteError(w, http.StatusBadRequest, "content is required (max 4096 chars)")
 		return
 	}
 
-	// 插入提示记录，默认不可见
 	_, err := p.db.ExecContext(r.Context(),
 		`INSERT INTO hints (res_id, challenge_id, content) VALUES (?, ?, ?)`,
 		uuid.Next(), chalID, req.Content)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
@@ -86,43 +83,38 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // update 处理更新提示的请求（管理员）。
-// 使用合并策略：只更新请求中提供的字段，未提供的保持不变。
-// 支持更新 content 和 is_visible 两个字段。
 func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 	hintID := chi.URLParam(r, "id")
-	if len(hintID) != 32 {
-		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(hintID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid hint id")
 		return
 	}
 
 	var req updateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 
-	// 验证内容长度（如果提供了的话）
 	if req.Content != nil && (len(*req.Content) == 0 || len(*req.Content) > 4096) {
-		http.Error(w, `{"error":"content must be 1-4096 chars"}`, http.StatusBadRequest)
+		pluginutil.WriteError(w, http.StatusBadRequest, "content must be 1-4096 chars")
 		return
 	}
 
-	// 获取当前值用于合并
 	var currentContent string
 	var currentIsVisible bool
 	err := p.db.QueryRowContext(r.Context(),
 		`SELECT content, is_visible FROM hints WHERE res_id = ? AND is_deleted = 0`, hintID).
 		Scan(&currentContent, &currentIsVisible)
 	if err == sql.ErrNoRows {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		pluginutil.WriteError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
-	// 确定新值：未提供的字段保持原值
 	newContent := currentContent
 	if req.Content != nil {
 		newContent = *req.Content
@@ -132,12 +124,11 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 		newIsVisible = *req.IsVisible
 	}
 
-	// 执行更新
 	_, err = p.db.ExecContext(r.Context(),
 		`UPDATE hints SET content = ?, is_visible = ? WHERE res_id = ? AND is_deleted = 0`,
 		newContent, newIsVisible, hintID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
@@ -145,31 +136,27 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 }
 
 // delete 处理删除提示的请求（管理员）。
-// 使用软删除，将 is_deleted 设为 1。
-// 如果提示不存在返回 404。
 func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 	hintID := chi.URLParam(r, "id")
-	if len(hintID) != 32 {
-		http.Error(w, `{"error":"invalid hint id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(hintID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid hint id")
 		return
 	}
 
-	// 软删除提示
 	result, err := p.db.ExecContext(r.Context(),
 		`UPDATE hints SET is_deleted = 1 WHERE res_id = ? AND is_deleted = 0`, hintID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
-	// 检查是否有记录被删除
 	rows, err := result.RowsAffected()
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	if rows == 0 {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		pluginutil.WriteError(w, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -177,21 +164,19 @@ func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // list 处理获取题目可见提示列表的请求。
-// 只返回 is_visible = 1 且未删除的提示，按创建时间升序排列。
 func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	chalID := chi.URLParam(r, "id")
-	if len(chalID) != 32 {
-		http.Error(w, `{"error":"invalid challenge id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(chalID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid challenge id")
 		return
 	}
 
-	// 查询可见且未删除的提示
 	rows, err := p.db.QueryContext(r.Context(),
 		`SELECT res_id, content, created_at FROM hints
 		 WHERE challenge_id = ? AND is_visible = 1 AND is_deleted = 0
 		 ORDER BY created_at ASC`, chalID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -200,17 +185,15 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var h hint
 		if err := rows.Scan(&h.ResID, &h.Content, &h.CreatedAt); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		hints = append(hints, h)
 	}
 
-	// 确保空列表返回 [] 而非 null
 	if hints == nil {
 		hints = []hint{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"hints": hints})
+	pluginutil.WriteJSON(w, http.StatusOK, map[string]any{"hints": hints})
 }

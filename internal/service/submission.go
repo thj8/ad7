@@ -97,7 +97,7 @@ func (s *SubmissionService) Submit(ctx context.Context, userID string, challenge
 // List 查询全局范围内的提交记录。
 // 参数均可为空字符串表示不过滤。
 func (s *SubmissionService) List(ctx context.Context, userID string, challengeID string) ([]model.Submission, error) {
-	return s.submissions.ListSubmissions(ctx, userID, challengeID)
+	return s.submissions.ListSubmissions(ctx, store.ListSubmissionsParams{UserID: userID, ChallengeID: challengeID})
 }
 
 // SubmitInCompRequest 是比赛内 Flag 提交的请求参数。
@@ -117,7 +117,7 @@ type SubmitInCompRequest struct {
 // 返回提交结果和可能的错误。
 func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompRequest) (SubmitResult, error) {
 	// 在比赛范围内检查是否已正确提交过
-	solved, err := s.submissions.HasCorrectSubmissionInComp(ctx, req.UserID, req.ChallengeID, req.CompetitionID)
+	solved, err := s.submissions.HasCorrectSubmission(ctx, req.UserID, req.ChallengeID, req.CompetitionID)
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +137,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 	// 比较 Flag
 	isCorrect := challenge.Flag == req.Flag
 	compID := req.CompetitionID
-	if err := s.submissions.CreateSubmissionWithComp(ctx, &model.Submission{
+	if err := s.submissions.CreateSubmission(ctx, &model.Submission{
 		UserID:        req.UserID,
 		ChallengeID:   req.ChallengeID,
 		CompetitionID: &compID,
@@ -164,5 +164,5 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 // ListByComp 查询指定比赛内的提交记录。
 // 可通过用户 ID 和题目 ID 进一步过滤。
 func (s *SubmissionService) ListByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
-	return s.submissions.ListSubmissionsByComp(ctx, competitionID, userID, challengeID)
+	return s.submissions.ListSubmissions(ctx, store.ListSubmissionsParams{CompetitionID: competitionID, UserID: userID, ChallengeID: challengeID})
 }

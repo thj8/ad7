@@ -34,29 +34,27 @@ type ChallengeStore interface {
 	Delete(ctx context.Context, resID string) error
 }
 
+// ListSubmissionsParams 是查询提交记录的参数结构体。
+// 所有字段均为可选，空字符串表示不过滤该条件。
+type ListSubmissionsParams struct {
+	CompetitionID string // 可选，比赛范围过滤
+	UserID        string // 可选，用户过滤
+	ChallengeID   string // 可选，题目过滤
+}
+
 // SubmissionStore 定义提交记录相关的数据访问接口。
 type SubmissionStore interface {
-	// HasCorrectSubmission 检查指定用户是否已正确提交过某道题目（全局范围）。
-	// 用于防止重复提交。
-	HasCorrectSubmission(ctx context.Context, userID string, challengeID string) (bool, error)
+	// HasCorrectSubmission 检查指定用户是否已正确提交过某道题目。
+	// 可选的 competitionID 参数用于限定比赛范围，不传则为全局范围。
+	HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID ...string) (bool, error)
 
-	// CreateSubmission 创建一条全局提交记录（不关联比赛）。
+	// CreateSubmission 创建提交记录。
+	// model.Submission.CompetitionID 非 nil 时关联比赛，为 nil 时为全局提交。
 	CreateSubmission(ctx context.Context, s *model.Submission) error
 
-	// ListSubmissions 根据用户 ID 和/或题目 ID 查询提交记录。
-	// 两个参数均可为空字符串，表示不过滤该条件。按创建时间倒序排列。
-	ListSubmissions(ctx context.Context, userID string, challengeID string) ([]model.Submission, error)
-
-	// HasCorrectSubmissionInComp 检查指定用户在指定比赛中是否已正确提交过某道题目。
-	// 用于比赛中防止重复提交。
-	HasCorrectSubmissionInComp(ctx context.Context, userID string, challengeID, competitionID string) (bool, error)
-
-	// CreateSubmissionWithComp 创建一条关联比赛的提交记录。
-	CreateSubmissionWithComp(ctx context.Context, s *model.Submission) error
-
-	// ListSubmissionsByComp 查询指定比赛内的提交记录。
-	// 可通过用户 ID 和/或题目 ID 进一步过滤。按创建时间倒序排列。
-	ListSubmissionsByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error)
+	// ListSubmissions 根据 params 查询提交记录。
+	// 按创建时间倒序排列。
+	ListSubmissions(ctx context.Context, params ListSubmissionsParams) ([]model.Submission, error)
 }
 
 // CompetitionStore 定义比赛相关的数据访问接口。

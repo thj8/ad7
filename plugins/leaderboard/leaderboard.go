@@ -6,7 +6,6 @@ package leaderboard
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"sort"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
+	"ad7/internal/pluginutil"
 )
 
 // Plugin 是排行榜插件，持有数据库连接。
@@ -52,64 +52,41 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	ctx := r.Context()
 
-	// 1. 获取比赛所有题目 ID
-	chalRows, err := p.db.QueryContext(ctx, `
-		SELECT c.res_id
-		FROM competition_challenges cc
-		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ? AND c.is_enabled = 1 AND c.is_deleted = 0
-		ORDER BY c.res_id`, compID)
+	// 1. 获取比赛所有题目 ID（通过共享查询函数获取完整信息，再提取 ID）
+	challenges, err := pluginutil.GetCompChallenges(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	defer chalRows.Close()
-
-	var chalIDs []string
-	for chalRows.Next() {
-		var id string
-		if err := chalRows.Scan(&id); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
-		}
-		chalIDs = append(chalIDs, id)
+	chalIDs := make([]string, 0, len(challenges))
+	for _, c := range challenges {
+		chalIDs = append(chalIDs, c.ResID)
 	}
 
 	// 2. 查询所有正确提交
-	solveRows, err := p.db.QueryContext(ctx, `
-		SELECT s.user_id, s.challenge_id, MIN(s.created_at)
-		FROM submissions s
-		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0
-		GROUP BY s.user_id, s.challenge_id`, compID)
+	solves, err := pluginutil.GetFirstCorrectSubmissions(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	defer solveRows.Close()
 
 	userSolves := make(map[string]map[string]time.Time)
 	var userIDs []string
-	for solveRows.Next() {
-		var uid, chalID string
-		var solvedAt time.Time
-		if err := solveRows.Scan(&uid, &chalID, &solvedAt); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
+	for _, fs := range solves {
+		if userSolves[fs.UserID] == nil {
+			userSolves[fs.UserID] = make(map[string]time.Time)
+			userIDs = append(userIDs, fs.UserID)
 		}
-		if userSolves[uid] == nil {
-			userSolves[uid] = make(map[string]time.Time)
-			userIDs = append(userIDs, uid)
-		}
-		userSolves[uid][chalID] = solvedAt
+		userSolves[fs.UserID][fs.ChallengeID] = fs.SolvedAt
 	}
 
-	// 3. 查询 topthree_records 获取一二三血排名
+	// 3. 查询 topthree_records 获取一二三血排名（私有表，保留在插件内）
 	bloodRows, err := p.db.QueryContext(ctx, `
 		SELECT user_id, challenge_id, ranking
 		FROM topthree_records
 		WHERE competition_id = ? AND ranking IN (1,2,3) AND is_deleted = 0`, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer bloodRows.Close()
@@ -119,46 +96,29 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		var uid, chalID string
 		var rank int
 		if err := bloodRows.Scan(&uid, &chalID, &rank); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		bloodRank[uid+":"+chalID] = rank
 	}
 
 	// 4. 计算总分
-	scoreRows, err := p.db.QueryContext(ctx, `
-		SELECT s.user_id, SUM(c.score)
-		FROM submissions s
-		JOIN challenges c ON c.res_id = s.challenge_id
-		WHERE s.is_correct = 1 AND s.competition_id = ? AND s.is_deleted = 0 AND c.is_deleted = 0
-		GROUP BY s.user_id`, compID)
+	totalScores, err := pluginutil.GetUserScores(ctx, p.db, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
-	}
-	defer scoreRows.Close()
-
-	totalScores := make(map[string]int)
-	for scoreRows.Next() {
-		var uid string
-		var score int
-		if err := scoreRows.Scan(&uid, &score); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-			return
-		}
-		totalScores[uid] = score
 	}
 
 	// 5. 组装排行榜
 	var board []entry
 	for _, uid := range userIDs {
-		solves := userSolves[uid]
+		solvedMap := userSolves[uid]
 		var lastSolveAt time.Time
-		challenges := make([]challengeResult, 0, len(chalIDs))
+		results := make([]challengeResult, 0, len(chalIDs))
 
 		for _, chalID := range chalIDs {
 			cr := challengeResult{ChallengeID: chalID}
-			if solvedAt, ok := solves[chalID]; ok {
+			if solvedAt, ok := solvedMap[chalID]; ok {
 				cr.Solved = true
 				cr.SolvedAt = solvedAt
 				if br, hasBr := bloodRank[uid+":"+chalID]; hasBr {
@@ -168,14 +128,14 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 					lastSolveAt = solvedAt
 				}
 			}
-			challenges = append(challenges, cr)
+			results = append(results, cr)
 		}
 
 		board = append(board, entry{
 			UserID:        uid,
 			TotalScore:    totalScores[uid],
 			LastSolveTime: lastSolveAt,
-			Challenges:    challenges,
+			Challenges:    results,
 		})
 	}
 
@@ -193,6 +153,5 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	if board == nil {
 		board = []entry{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"leaderboard": board})
+	pluginutil.WriteJSON(w, http.StatusOK, map[string]any{"leaderboard": board})
 }

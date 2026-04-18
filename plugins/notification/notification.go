@@ -11,6 +11,7 @@ import (
 
 	"ad7/internal/middleware"
 	"ad7/internal/model"
+	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
 )
 
@@ -37,7 +38,6 @@ type createReq struct {
 }
 
 // listByComp 处理获取比赛通知列表的请求。
-// 查询指定比赛的所有通知，按创建时间倒序排列。
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	rows, err := p.db.QueryContext(r.Context(), `
@@ -46,7 +46,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		WHERE competition_id = ? AND is_deleted = 0
 		ORDER BY created_at DESC`, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -55,35 +55,30 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var n model.Notification
 		if err := rows.Scan(&n.ResID, &n.CompetitionID, &n.Title, &n.Message, &n.CreatedAt); err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		ns = append(ns, n)
 	}
-	// 确保空列表返回 [] 而非 null
 	if ns == nil {
 		ns = []model.Notification{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"notifications": ns})
+	pluginutil.WriteJSON(w, http.StatusOK, map[string]any{"notifications": ns})
 }
 
 // createForComp 处理创建比赛通知的请求（管理员）。
-// 验证 title 和 message 均为必填，插入数据库后返回 201。
 func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	var req createReq
-	// 验证请求体和必填字段
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Message == "" {
-		http.Error(w, `{"error":"title and message are required"}`, http.StatusBadRequest)
+		pluginutil.WriteError(w, http.StatusBadRequest, "title and message are required")
 		return
 	}
-	// 插入通知记录，自动生成 res_id
 	_, err := p.db.ExecContext(r.Context(),
 		`INSERT INTO notifications (res_id, competition_id, title, message) VALUES (?, ?, ?, ?)`,
 		uuid.Next(), compID, req.Title, req.Message)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
