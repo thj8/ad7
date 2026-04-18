@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     res_id         VARCHAR(32)  NOT NULL UNIQUE,
     user_id        VARCHAR(128) NOT NULL,
     challenge_id   VARCHAR(32)  NOT NULL,
-    competition_id VARCHAR(32)  NULL,
+    competition_id VARCHAR(32)  NOT NULL,
     submitted_flag VARCHAR(255) NOT NULL,
     is_correct     TINYINT(1)   NOT NULL,
     is_deleted     TINYINT(1)   NOT NULL DEFAULT 0,

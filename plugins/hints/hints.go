@@ -7,11 +7,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
+	"ad7/internal/model"
 	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
 )
@@ -24,9 +24,10 @@ func New() *Plugin { return &Plugin{} }
 
 // hint 表示一条题目提示。
 type hint struct {
-	ResID     string    `json:"id"`         // 提示的 UUID 标识
-	Content   string    `json:"content"`    // 提示内容
-	CreatedAt time.Time `json:"created_at"` // 创建时间
+	model.BaseModel
+	ChallengeID string `json:"-"`         // 题目 ID，不暴露给 API
+	Content     string `json:"content"`    // 提示内容
+	IsVisible   bool   `json:"is_visible"` // 是否可见
 }
 
 // createReq 是创建提示的请求体结构。
@@ -172,7 +173,7 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := p.db.QueryContext(r.Context(),
-		`SELECT res_id, content, created_at FROM hints
+		`SELECT id, res_id, created_at, updated_at, is_deleted, content, is_visible FROM hints
 		 WHERE challenge_id = ? AND is_visible = 1 AND is_deleted = 0
 		 ORDER BY created_at ASC`, chalID)
 	if err != nil {
@@ -184,7 +185,7 @@ func (p *Plugin) list(w http.ResponseWriter, r *http.Request) {
 	var hints []hint
 	for rows.Next() {
 		var h hint
-		if err := rows.Scan(&h.ResID, &h.Content, &h.CreatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.ResID, &h.CreatedAt, &h.UpdatedAt, &h.IsDeleted, &h.Content, &h.IsVisible); err != nil {
 			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
