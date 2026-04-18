@@ -29,12 +29,12 @@ type Challenge struct {
 }
 
 // Submission 表示一次 Flag 提交记录。
-// 支持两种场景：全局提交（CompetitionID 为 nil）和比赛内提交。
+// 所有提交都关联到比赛，CompetitionID 为必填字段。
 type Submission struct {
 	BaseModel
 	UserID        string    `json:"user_id"`        // 提交用户 ID（来自 JWT 的 sub claim）
 	ChallengeID   string    `json:"challenge_id"`   // 提交的题目 ID
-	CompetitionID *string   `json:"competition_id"` // 所属比赛 ID，nil 表示全局提交
+	CompetitionID string    `json:"competition_id"` // 所属比赛 ID
 	SubmittedFlag string    `json:"submitted_flag"` // 用户提交的 Flag 内容
 	IsCorrect     bool      `json:"is_correct"`     // 提交是否正确
 }

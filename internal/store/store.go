@@ -44,12 +44,11 @@ type ListSubmissionsParams struct {
 
 // SubmissionStore 定义提交记录相关的数据访问接口。
 type SubmissionStore interface {
-	// HasCorrectSubmission 检查指定用户是否已正确提交过某道题目。
+	// HasCorrectSubmission 检查指定用户在指定比赛中是否已正确提交过某道题目。
 	// 可选的 competitionID 参数用于限定比赛范围，不传则为全局范围。
 	HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID ...string) (bool, error)
 
-	// CreateSubmission 创建提交记录。
-	// model.Submission.CompetitionID 非 nil 时关联比赛，为 nil 时为全局提交。
+	// CreateSubmission 创建提交记录，CompetitionID 为必填。
 	CreateSubmission(ctx context.Context, s *model.Submission) error
 
 	// ListSubmissions 根据 params 查询提交记录。

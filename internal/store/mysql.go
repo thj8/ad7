@@ -118,8 +118,8 @@ func (s *Store) Delete(ctx context.Context, resID string) error {
 	return err
 }
 
-// HasCorrectSubmission 检查指定用户是否已正确提交过某道题目。
-// 可选的 competitionID 参数用于限定比赛范围，不传则为全局范围。
+// HasCorrectSubmission 检查指定用户在指定比赛中是否已正确提交过某道题目。
+// 用于防止重复提交。
 func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID ...string) (bool, error) {
 	query := `SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1 AND is_deleted=0`
 	args := []any{userID, challengeID}
@@ -133,18 +133,12 @@ func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challen
 }
 
 // CreateSubmission 创建提交记录。
-// model.Submission.CompetitionID 非 nil 时关联比赛，为 nil 时为全局提交。
+// CompetitionID 为必填字段，所有提交都关联到比赛。
 func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) error {
 	sub.ResID = uuid.Next()
-	if sub.CompetitionID != nil && *sub.CompetitionID != "" {
-		_, err := s.db.ExecContext(ctx,
-			`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
-			sub.ResID, sub.UserID, sub.ChallengeID, *sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
-		return err
-	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO submissions (res_id, user_id, challenge_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?)`,
-		sub.ResID, sub.UserID, sub.ChallengeID, sub.SubmittedFlag, sub.IsCorrect)
+		`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
+		sub.ResID, sub.UserID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
 	return err
 }
 
