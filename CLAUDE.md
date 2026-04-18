@@ -1,90 +1,90 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 提供使用本仓库代码的指导。
 
-## Commands
+## 命令
 
 ```bash
-# Build
+# 构建
 go build ./...
 
-# Run server (from project root)
+# 运行服务器（从项目根目录）
 go run ./cmd/server -config config.yaml
 
-# Seed test data (15 competitions, 50 challenges, 30 users each)
+# 生成测试数据（15个比赛、50个题目、每个比赛30个用户）
 go run ./cmd/seed/
 TEST_DSN="root:pass@tcp(host:3306)/ctf?parseTime=true" go run ./cmd/seed/
 
-# Demo script (query competitions, submit flags, check leaderboard)
+# 演示脚本（查询比赛、提交Flag、查看排行榜）
 ./scripts/demo.sh
 BASE_URL=http://host:8080 ./scripts/demo.sh
 
-# Run all tests
+# 运行所有测试
 go test ./...
 
-# Run integration tests only (requires MySQL at 192.168.5.44)
+# 仅运行集成测试（需要 MySQL 在 192.168.5.44）
 go test ./internal/integration/... -v -count=1
 
-# Run a single test
+# 运行单个测试
 go test ./internal/integration/... -v -run TestSubmitFlag -count=1
 
-# Apply schema to DB
+# 应用数据库架构
 mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 ```
 
-## Architecture
+## 架构
 
-Layered Go service: **handler → service → store** + **plugin system**
+分层 Go 服务：**handler → service → store** + **插件系统**
 
-- `cmd/server/main.go` — wires everything: loads config, opens DB, creates store/services/handlers, registers chi routes, loads plugins, starts HTTP server
-- `cmd/seed/main.go` — populates DB with test data: 50 challenges, 15 competitions, 30 users per competition with differentiated solve rates (top user 72%)
-- `internal/config/` — YAML config loading (`server.port`, `db.*`, `jwt.secret`, `jwt.admin_role`)
-- `internal/model/` — domain structs: `Challenge`, `Submission`, `Notification`, `Competition`, `CompetitionChallenge`. `Flag` has `json:"-"` so it never appears in API responses. All entities use UUID `res_id` (32-character hex string, no hyphens) as public ID.
-- `internal/store/` — `store.go` defines `ChallengeStore`, `SubmissionStore`, `CompetitionStore` interfaces; `mysql.go` implements all on a single `*Store` struct
-- `internal/service/` — business logic: `ChallengeService` (CRUD), `SubmissionService` (flag verification, in-competition submission), `CompetitionService` (competition CRUD, challenge assignment)
-- `internal/handler/` — HTTP layer only; uses separate request structs to receive fields that have `json:"-"` on models
-- `internal/middleware/` — JWT auth (`Authenticate`) and admin gate (`RequireAdmin`); extracts `sub`→`user_id` and `role` from claims into context
-- `internal/plugin/` — `Plugin` interface: `Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`
-- `internal/snowflake/` — UUID v4 generator (32-character hex string without hyphens)
-- `plugins/leaderboard/` — per-competition leaderboard, ranked by total score desc, ties by earliest solve time asc
-- `plugins/notification/` — per-competition notifications, admin creates, all users can list
-- `plugins/hints/` — challenge hints system, admin manages, users list visible hints
-- `plugins/dashboard/` — competition dashboard with first blood tracking
-- `plugins/analytics/` — competition analytics (overview, categories, users, challenges)
+- `cmd/server/main.go` — 组装所有组件：加载配置、打开数据库、创建 store/service/handler、注册 chi 路由、加载插件、启动 HTTP 服务器
+- `cmd/seed/main.go` — 填充测试数据：50个题目、15个比赛、每个比赛30个用户，解题率差异化（顶部用户72%）
+- `internal/config/` — YAML 配置加载（`server.port`、`db.*`、`jwt.secret`、`jwt.admin_role`）
+- `internal/model/` — 领域结构体：`Challenge`、`Submission`、`Notification`、`Competition`、`CompetitionChallenge`。`Flag` 字段有 `json:"-"` 所以永远不会出现在 API 响应中。所有实体使用 UUID `res_id`（32字符十六进制字符串，无连字符）作为公开 ID。
+- `internal/store/` — `store.go` 定义 `ChallengeStore`、`SubmissionStore`、`CompetitionStore` 接口；`mysql.go` 在单个 `*Store` 结构体上实现所有接口
+- `internal/service/` — 业务逻辑：`ChallengeService`（CRUD）、`SubmissionService`（Flag验证、比赛内提交）、`CompetitionService`（比赛CRUD、题目分配）
+- `internal/handler/` — 仅 HTTP 层；使用单独的请求结构体来接收模型上有 `json:"-"` 的字段
+- `internal/middleware/` — JWT 认证（`Authenticate`）和管理员关卡（`RequireAdmin`）；从 claims 中提取 `sub`→`user_id` 和 `role` 到上下文
+- `internal/plugin/` — `Plugin` 接口：`Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`
+- `internal/snowflake/` — UUID v4 生成器（32字符十六进制字符串，无连字符）
+- `plugins/leaderboard/` — 每个比赛的排行榜，按总分降序排列，同分按最早解题时间升序排列
+- `plugins/notification/` — 每个比赛的通知，管理员创建，所有用户可查看
+- `plugins/hints/` — 题目提示系统，管理员管理，用户查看可见提示
+- `plugins/dashboard/` — 比赛仪表盘，含一血追踪
+- `plugins/analytics/` — 比赛分析（概览、分类、用户、题目）
 
-## Key Design Decisions
+## 关键设计决策
 
-**UUID res_id**: All entities use `res_id VARCHAR(32)` (UUID v4, 32-character hex string without hyphens) as the public-facing ID. The auto-increment `id` column is internal only (`json:"-"`). API paths and responses use `res_id` exclusively.
+**UUID res_id**：所有实体使用 `res_id VARCHAR(32)`（UUID v4，32字符十六进制字符串无连字符）作为公开 ID。自增 `id` 列仅内部使用（`json:"-"`）。API 路径和响应仅使用 `res_id`。
 
-**Flag field**: `model.Challenge.Flag` is `json:"-"`. Handlers use separate request structs (`createRequest`, `updateRequest`) to decode the flag from incoming JSON, then manually assign it to the model before passing to the service.
+**Flag 字段**：`model.Challenge.Flag` 是 `json:"-"`。Handler 使用单独的请求结构体（`createRequest`、`updateRequest`）从传入的 JSON 解码 flag，然后在传递给 service 之前手动赋值给模型。
 
-**Single store struct**: `*store.Store` implements all store interfaces. In `main.go` it is passed to all services.
+**单一 store 结构体**：`*store.Store` 实现所有 store 接口。在 `main.go` 中传递给所有 service。
 
-**Admin auth**: JWT middleware reads `role` claim; `RequireAdmin` compares it to `cfg.JWT.AdminRole` (default `"admin"`). User identity comes from `sub` claim.
+**管理员认证**：JWT 中间件读取 `role` claim；`RequireAdmin` 将其与 `cfg.JWT.AdminRole`（默认 `"admin"`）比较。用户身份来自 `sub` claim。
 
-**Competition-scoped**: There is no global leaderboard or global notifications. Everything is scoped to a competition. Submissions outside competitions are still supported for backwards compatibility.
+**比赛范围**：没有全局排行榜或全局通知。所有内容都限定在比赛范围内。为了向后兼容，仍支持比赛外的提交。
 
-**Plugin system**: Plugins implement the `Plugin` interface and register their own chi routes in `main.go`. They receive `*sql.DB` and `*middleware.Auth` for direct DB access and route protection.
+**插件系统**：插件实现 `Plugin` 接口并在 `main.go` 中注册自己的 chi 路由。它们接收 `*sql.DB` 和 `*middleware.Auth` 用于直接数据库访问和路由保护。
 
-**No foreign keys**: Per project constraint, the database does not use foreign key constraints.
+**无外键**：根据项目约束，数据库不使用外键约束。
 
-**Input validation**: String fields have length limits (title/flag max 255, description max 4096). `parseID` returns 400 on invalid input. Notification `message` is required.
+**输入验证**：字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）。`parseID` 在无效输入时返回 400。通知 `message` 是必填的。
 
-## Integration Tests
+## 集成测试
 
-Tests in `internal/integration/` connect to a real MySQL instance. 16 tests covering:
-- Challenge CRUD (List, Get, Submit, Admin CRUD, Submissions list)
-- Competition CRUD
-- Competition challenge assignment
-- In-competition flag submission
-- Per-competition leaderboard
-- Per-competition notifications
+`internal/integration/` 中的测试连接到真实的 MySQL 实例。16个测试覆盖：
+- 题目 CRUD（列表、获取、提交、管理员CRUD、提交列表）
+- 比赛 CRUD
+- 比赛题目分配
+- 比赛内 Flag 提交
+- 每个比赛的排行榜
+- 每个比赛的通知
 
-`testDSN` reads from `TEST_DSN` env var, falls back to hardcoded default. `testSecret` is separate from production secret.
+`testDSN` 从 `TEST_DSN` 环境变量读取，回退到硬编码默认值。`testSecret` 与生产密钥分开。
 
-Each test calls `cleanup(t)` which deletes from all tables in dependency order.
+每个测试调用 `cleanup(t)`，按依赖顺序删除所有表中的数据。
 
 ## 约束
-- 每次添加新功能，都必须添加完成的测试用例
+- 每次添加新功能，都必须添加完整的测试用例
 - 改一个bug，要写一个测试用例，保证此bug不会再次发生
 - 数据库不要使用外键关联

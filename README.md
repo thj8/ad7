@@ -1,173 +1,173 @@
-# AD7 - CTF Jeopardy Platform
+# AD7 - CTF Jeopardy 平台
 
-A multi-competition CTF (Capture The Flag) Jeopardy platform built with Go.
+一个使用 Go 构建的多比赛 CTF（夺旗赛）Jeopardy 平台。
 
-## Features
+## 功能特性
 
-- **Multi-competition support** — Create and manage multiple independent competitions, each with its own set of challenges
-- **Challenge management** — Admin CRUD for challenges with static flag verification
-- **In-competition flag submission** — Users submit flags within a competition context, with duplicate-solve prevention
-- **Per-competition leaderboard** — Ranked by total score descending, ties broken by earliest solve time
-- **Per-competition notifications** — Admin can post announcements scoped to a competition
-- **Competition analytics** — Detailed statistics including overview, category-wise, user-wise, and challenge-wise analytics
-- **Plugin system** — Extensible compile-time plugin interface for adding new features
-- **UUID IDs** — All public-facing IDs use UUID v4 (32-character hex strings without hyphens) for unique identifiers
-- **JWT authentication** — Bearer token auth with admin role gating (user management handled externally)
+- **多比赛支持** — 创建和管理多个独立的比赛，每个比赛有自己的题目集合
+- **题目管理** — 管理员 CRUD 操作，使用静态 Flag 验证
+- **比赛内 Flag 提交** — 用户在比赛上下文中提交 Flag，防止重复解题
+- **每个比赛的排行榜** — 按总分降序排列，同分按最早解题时间打破平局
+- **每个比赛的通知** — 管理员可以发布限定在比赛范围内的公告
+- **比赛分析** — 详细统计数据，包括概览、分类、用户和题目分析
+- **插件系统** — 可扩展的编译时插件接口，用于添加新功能
+- **UUID ID** — 所有公开 ID 使用 UUID v4（32字符十六进制字符串无连字符）作为唯一标识符
+- **JWT 认证** — Bearer Token 认证，带管理员角色关卡（用户管理在外部处理）
 
-## Quick Start
+## 快速开始
 
 ```bash
-# Install dependencies
+# 安装依赖
 go mod download
 
-# Configure
+# 配置
 cp config.yaml.example config.yaml
-# Edit config.yaml with your MySQL and JWT settings
+# 编辑 config.yaml，填入你的 MySQL 和 JWT 设置
 
-# Apply database schema
+# 应用数据库架构
 mysql -u root -p your_db < sql/schema.sql
 
-# Seed test data (optional)
+# 生成测试数据（可选）
 go run ./cmd/seed/
 
-# Run server
+# 运行服务器
 go run ./cmd/server -config config.yaml
 
-# Try the demo script
+# 尝试演示脚本
 ./scripts/demo.sh
 ```
 
-## API Overview
+## API 概览
 
-### Authentication
+### 认证
 
-All endpoints require a Bearer JWT token in the `Authorization` header. Admin endpoints additionally require `role: admin` in the token claims.
+所有端点都需要在 `Authorization` 头中提供 Bearer JWT Token。管理员端点另外需要 token claims 中有 `role: admin`。
 
-### Challenges (Admin)
+### 题目（管理员）
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| POST | `/api/v1/admin/challenges` | Create challenge |
-| PUT | `/api/v1/admin/challenges/{id}` | Update challenge |
-| DELETE | `/api/v1/admin/challenges/{id}` | Delete challenge |
+| POST | `/api/v1/admin/challenges` | 创建题目 |
+| PUT | `/api/v1/admin/challenges/{id}` | 更新题目 |
+| DELETE | `/api/v1/admin/challenges/{id}` | 删除题目 |
 
-### Challenges (User)
+### 题目（用户）
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| GET | `/api/v1/challenges` | List enabled challenges |
-| GET | `/api/v1/challenges/{id}` | Get challenge detail |
+| GET | `/api/v1/challenges` | 列出已启用的题目 |
+| GET | `/api/v1/challenges/{id}` | 获取题目详情 |
 
-### Submissions
+### 提交
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| POST | `/api/v1/challenges/{id}/submit` | Submit flag (global) |
-| POST | `/api/v1/competitions/{comp_id}/challenges/{id}/submit` | Submit flag (in competition) |
-| GET | `/api/v1/admin/submissions` | List submissions (admin) |
+| POST | `/api/v1/challenges/{id}/submit` | 提交 Flag（全局） |
+| POST | `/api/v1/competitions/{comp_id}/challenges/{id}/submit` | 提交 Flag（比赛内） |
+| GET | `/api/v1/admin/submissions` | 列出提交（管理员） |
 
-### Competitions (Admin)
+### 比赛（管理员）
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| POST | `/api/v1/admin/competitions` | Create competition |
-| PUT | `/api/v1/admin/competitions/{id}` | Update competition |
-| DELETE | `/api/v1/admin/competitions/{id}` | Delete competition |
-| GET | `/api/v1/admin/competitions` | List all competitions |
-| POST | `/api/v1/admin/competitions/{id}/challenges` | Add challenge to competition |
-| DELETE | `/api/v1/admin/competitions/{id}/challenges/{challenge_id}` | Remove challenge from competition |
+| POST | `/api/v1/admin/competitions` | 创建比赛 |
+| PUT | `/api/v1/admin/competitions/{id}` | 更新比赛 |
+| DELETE | `/api/v1/admin/competitions/{id}` | 删除比赛 |
+| GET | `/api/v1/admin/competitions` | 列出所有比赛 |
+| POST | `/api/v1/admin/competitions/{id}/challenges` | 向比赛添加题目 |
+| DELETE | `/api/v1/admin/competitions/{id}/challenges/{challenge_id}` | 从比赛移除题目 |
 
-### Competitions (User)
+### 比赛（用户）
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| GET | `/api/v1/competitions` | List active competitions |
-| GET | `/api/v1/competitions/{id}` | Get competition detail |
-| GET | `/api/v1/competitions/{id}/challenges` | List competition challenges |
+| GET | `/api/v1/competitions` | 列出活跃比赛 |
+| GET | `/api/v1/competitions/{id}` | 获取比赛详情 |
+| GET | `/api/v1/competitions/{id}/challenges` | 列出比赛题目 |
 
-### Plugins
+### 插件
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| GET | `/api/v1/competitions/{id}/leaderboard` | Competition leaderboard |
-| POST | `/api/v1/admin/competitions/{id}/notifications` | Create competition notification |
-| GET | `/api/v1/competitions/{id}/notifications` | List competition notifications |
-| GET | `/api/v1/competitions/{id}/analytics/overview` | Competition overview statistics |
-| GET | `/api/v1/competitions/{id}/analytics/categories` | Category-wise statistics |
-| GET | `/api/v1/competitions/{id}/analytics/users` | User performance statistics |
-| GET | `/api/v1/competitions/{id}/analytics/challenges` | Challenge difficulty statistics |
-| POST | `/api/v1/admin/challenges/{id}/hints` | Create challenge hint |
-| PUT | `/api/v1/admin/hints/{id}` | Update challenge hint |
-| DELETE | `/api/v1/admin/hints/{id}` | Delete challenge hint |
-| GET | `/api/v1/challenges/{id}/hints` | List visible challenge hints |
+| GET | `/api/v1/competitions/{id}/leaderboard` | 比赛排行榜 |
+| POST | `/api/v1/admin/competitions/{id}/notifications` | 创建比赛通知 |
+| GET | `/api/v1/competitions/{id}/notifications` | 列出比赛通知 |
+| GET | `/api/v1/competitions/{id}/analytics/overview` | 比赛概览统计 |
+| GET | `/api/v1/competitions/{id}/analytics/categories` | 分类统计 |
+| GET | `/api/v1/competitions/{id}/analytics/users` | 用户表现统计 |
+| GET | `/api/v1/competitions/{id}/analytics/challenges` | 题目难度统计 |
+| POST | `/api/v1/admin/challenges/{id}/hints` | 创建题目提示 |
+| PUT | `/api/v1/admin/hints/{id}` | 更新题目提示 |
+| DELETE | `/api/v1/admin/hints/{id}` | 删除题目提示 |
+| GET | `/api/v1/challenges/{id}/hints` | 列出可见的题目提示 |
 
-### Competition Analytics
+### 比赛分析
 
-The analytics plugin provides detailed statistics for competitions:
+分析插件为比赛提供详细统计数据：
 
-**Overview (`/analytics/overview`)**
-- Total users, challenges, submissions
-- Correct submissions count
-- Average solves per user
-- Average solve time (from competition start)
-- Completion rate (average % of challenges solved)
+**概览（`/analytics/overview`）**
+- 总用户数、题目数、提交数
+- 正确提交数量
+- 平均每人解题数
+- 平均解题时间（从比赛开始计算）
+- 完成率（平均每人解题百分比）
 
-**By Category (`/analytics/categories`)**
-- Total challenges per category
-- Total solves per category
-- Unique users solved per category
-- Average solves per user
-- Success rate (correct / total submissions)
+**按分类（`/analytics/categories`）**
+- 每个分类的总题目数
+- 每个分类的总解题数
+- 每个分类的独立解题用户数
+- 平均每人解题数
+- 成功率（正确 / 总提交数）
 
-**User Stats (`/analytics/users`)**
-- Total solves, total score, total attempts per user
-- Success rate per user
-- First and last solve time
-- Ordered by total score descending, first solve ascending
+**用户统计（`/analytics/users`）**
+- 每个用户的总解题数、总分、总尝试数
+- 每个用户的成功率
+- 第一次和最后一次解题时间
+- 按总分降序、第一次解题时间升序排列
 
-**Challenge Stats (`/analytics/challenges`)**
-- Total solves, attempts, success rate per challenge
-- Unique users solved
-- First solve time
-- Average time to solve (from first submission to correct)
+**题目统计（`/analytics/challenges`）**
+- 每个题目的总解题数、尝试数、成功率
+- 独立解题用户数
+- 第一次解题时间
+- 平均解题时间（从第一次提交到正确提交）
 
-## Tech Stack
+## 技术栈
 
-- **Go 1.22** with [chi](https://github.com/go-chi/chi/v5) router
-- **MySQL** via `database/sql`
-- **JWT** (HS256) via `golang-jwt/jwt/v5`
-- **UUID v4** — custom implementation for 32-character hex UUIDs without hyphens
+- **Go 1.22** 使用 [chi](https://github.com/go-chi/chi/v5) 路由器
+- **MySQL** 通过 `database/sql`
+- **JWT**（HS256）通过 `golang-jwt/jwt/v5`
+- **UUID v4** — 自定义实现，生成 32 字符十六进制 UUID 无连字符
 
-## Project Structure
+## 项目结构
 
 ```
 .
 ├── cmd/
-│   ├── server/           # Entry point
-│   └── seed/             # Test data seeder
+│   ├── server/           # 入口点
+│   └── seed/             # 测试数据生成器
 ├── scripts/
-│   └── demo.sh           # Demo: query competitions, submit flags, leaderboard
+│   └── demo.sh           # 演示：查询比赛、提交 Flag、排行榜
 ├── internal/
-│   ├── config/           # YAML config loading
-│   ├── handler/          # HTTP handlers
-│   ├── middleware/        # JWT auth, admin gate
-│   ├── model/            # Domain structs
-│   ├── plugin/           # Plugin interface
-│   ├── service/          # Business logic
-│   ├── snowflake/        # ID generator
-│   ├── store/            # DB interfaces + MySQL impl
-│   └── integration/      # Integration tests
+│   ├── config/           # YAML 配置加载
+│   ├── handler/          # HTTP 处理器
+│   ├── middleware/        # JWT 认证、管理员关卡
+│   ├── model/            # 领域结构体
+│   ├── plugin/           # 插件接口
+│   ├── service/          # 业务逻辑
+│   ├── snowflake/        # ID 生成器
+│   ├── store/            # DB 接口 + MySQL 实现
+│   └── integration/      # 集成测试
 ├── plugins/
-│   ├── leaderboard/      # Per-competition leaderboard
-│   ├── notification/     # Per-competition notifications
-│   ├── analytics/        # Competition analytics (overview, categories, users, challenges)
-│   ├── hints/            # Challenge hints system
-│   └── dashboard/        # Competition dashboard with first blood
-├── sql/schema.sql        # Database schema
-└── config.yaml           # Configuration
+│   ├── leaderboard/      # 每个比赛的排行榜
+│   ├── notification/     # 每个比赛的通知
+│   ├── analytics/        # 比赛分析（概览、分类、用户、题目）
+│   ├── hints/            # 题目提示系统
+│   └── dashboard/        # 比赛仪表盘，含一血
+├── sql/schema.sql        # 数据库架构
+└── config.yaml           # 配置
 ```
 
-## Configuration
+## 配置
 
 ```yaml
 server:
@@ -185,6 +185,6 @@ jwt:
   admin_role: "admin"
 ```
 
-## License
+## 许可证
 
 MIT
