@@ -5,15 +5,17 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config 是顶层配置结构体，包含服务器、数据库和 JWT 三个子配置。
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	DB     DBConfig     `yaml:"db"`
-	JWT    JWTConfig    `yaml:"jwt"`
+	Server    ServerConfig    `yaml:"server"`
+	DB        DBConfig        `yaml:"db"`
+	JWT       JWTConfig       `yaml:"jwt"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
 
 // ServerConfig 定义 HTTP 服务器的监听端口。
@@ -43,6 +45,17 @@ type JWTConfig struct {
 	AdminRole string `yaml:"admin_role"`
 }
 
+// RateLimitRule defines a rate limit rule with requests per time window.
+type RateLimitRule struct {
+	Requests int           `yaml:"requests"` // Maximum number of requests
+	Window   time.Duration `yaml:"window"`   // Time window for the limit
+}
+
+// RateLimitConfig contains rate limit configurations for different endpoints.
+type RateLimitConfig struct {
+	Submission RateLimitRule `yaml:"submission"` // Rate limit for flag submissions
+}
+
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
 // 参数：
 //   - path: 配置文件的文件系统路径
@@ -68,6 +81,13 @@ func Load(path string) (*Config, error) {
 	// 设置默认管理员角色名
 	if cfg.JWT.AdminRole == "" {
 		cfg.JWT.AdminRole = "admin"
+	}
+	// Set default rate limit for submissions: 3 requests per 10 seconds
+	if cfg.RateLimit.Submission.Requests == 0 {
+		cfg.RateLimit.Submission.Requests = 3
+	}
+	if cfg.RateLimit.Submission.Window == 0 {
+		cfg.RateLimit.Submission.Window = 10 * time.Second
 	}
 	return &cfg, nil
 }
