@@ -84,7 +84,12 @@ func main() {
 		r.Get("/competitions", compH.List)
 		r.Get("/competitions/{id}", compH.Get)
 		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
-		r.Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
+		r.With(
+			middleware.LimitByUserID(
+				cfg.RateLimit.Submission.Requests,
+				cfg.RateLimit.Submission.Window,
+			),
+		).Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
 
 		// 管理员路由：需要 admin 角色
 		r.Route("/admin", func(r chi.Router) {
