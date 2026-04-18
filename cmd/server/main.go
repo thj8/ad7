@@ -18,7 +18,7 @@ import (
 	"ad7/internal/service"
 	"ad7/internal/store"
 	"ad7/plugins/analytics"
-	"ad7/plugins/dashboard"
+
 	"ad7/plugins/hints"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
@@ -116,9 +116,8 @@ func main() {
 		leaderboard.New(),  // 排行榜插件
 		notification.New(), // 通知插件
 		analytics.New(),    // 分析插件
-		dashboard.New(),    // 仪表盘插件
-		hints.New(),        // 题目提示插件
 		topthree.New(),     // 三血插件
+		hints.New(),        // 题目提示插件
 	}
 	for _, p := range plugins {
 		p.Register(r, st.DB(), auth)
