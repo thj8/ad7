@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go version:*)",
+      "Skill(commit-commands:commit)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote:*)",
+      "Bash(git push:*)",
+      "Bash(mysql:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh auth:*)",
+      "Bash(/dev/null:*)",
+      "Bash(claude plugin:*)",
+      "Bash(/update)",
+      "Bash(claude plugins:*)",
+      "Bash(claude install-skill:*)",
+      "Bash(npx skills:*)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh)",
+      "Bash(sh)",
+      "Bash(rtk init:*)",
+      "Bash(rtk ls:*)",
+      "Bash(rtk git:*)",
+      "Bash(rtk npx:*)",
+      "Bash(node:*)",
+      "Bash(rtk read:*)",
+      "WebSearch",
+      "Bash(rtk go:*)",
+      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l\\).get\\(''''Test'''',''''''''\\),json.loads\\(l\\).get\\(''''Action'''',''''''''\\)\\) for l in sys.stdin if json.loads\\(l\\).get\\(''''Action''''\\) in \\(''''pass'''',''''fail''''\\)]\")",
+      "Bash(git merge:*)",
+      "Bash(gh pr:*)",
+      "Bash(git branch:*)",
+      "Bash(xargs -r git branch -D)",
+      "Bash(xargs -r -I {} git push origin --delete {})"
+    ]
+  }
+}

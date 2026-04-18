@@ -55,20 +55,14 @@ mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 ## 关键设计决策
 
 **UUID res_id**：所有实体使用 `res_id VARCHAR(32)`（UUID v4，32字符十六进制字符串无连字符）作为公开 ID。自增 `id` 列仅内部使用（`json:"-"`）。API 路径和响应仅使用 `res_id`。
-
 **Flag 字段**：`model.Challenge.Flag` 是 `json:"-"`。Handler 使用单独的请求结构体（`createRequest`、`updateRequest`）从传入的 JSON 解码 flag，然后在传递给 service 之前手动赋值给模型。
-
 **单一 store 结构体**：`*store.Store` 实现所有 store 接口。在 `main.go` 中传递给所有 service。
-
 **管理员认证**：JWT 中间件读取 `role` claim；`RequireAdmin` 将其与 `cfg.JWT.AdminRole`（默认 `"admin"`）比较。用户身份来自 `sub` claim。
-
 **比赛范围**：没有全局排行榜或全局通知。所有内容都限定在比赛范围内。为了向后兼容，仍支持比赛外的提交。
-
 **插件系统**：插件实现 `Plugin` 接口并在 `main.go` 中注册自己的 chi 路由。它们接收 `*sql.DB` 和 `*middleware.Auth` 用于直接数据库访问和路由保护。
-
 **无外键**：根据项目约束，数据库不使用外键约束。
-
 **输入验证**：字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）。`parseID` 在无效输入时返回 400。通知 `message` 是必填的。
+**Model基类**: 所有model都要基于BaseModel,具有id，res_id, created_at, updated_at, is_deleted.
 
 ## 集成测试
 
@@ -87,4 +81,3 @@ mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
 ## 约束
 - 每次添加新功能，都必须添加完整的测试用例
 - 改一个bug，要写一个测试用例，保证此bug不会再次发生
-- 数据库不要使用外键关联

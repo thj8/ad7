@@ -1,3 +1,5 @@
 config.yaml
 /seed
 .idea/
+server
+.claude/settings.local.json
