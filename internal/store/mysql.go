@@ -119,16 +119,11 @@ func (s *Store) Delete(ctx context.Context, resID string) error {
 }
 
 // HasCorrectSubmission 检查指定用户在指定比赛中是否已正确提交过某道题目。
-// 用于防止重复提交。
-func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID ...string) (bool, error) {
-	query := `SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND is_correct=1 AND is_deleted=0`
-	args := []any{userID, challengeID}
-	if len(competitionID) > 0 && competitionID[0] != "" {
-		query += " AND competition_id=?"
-		args = append(args, competitionID[0])
-	}
+// 用于防止重复提交，competitionID 为必填参数。
+func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM submissions WHERE user_id=? AND challenge_id=? AND competition_id=? AND is_correct=1 AND is_deleted=0`
 	var count int
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	err := s.db.QueryRowContext(ctx, query, userID, challengeID, competitionID).Scan(&count)
 	return count > 0, err
 }
 
