@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
 	"ad7/internal/pluginutil"
@@ -80,6 +81,7 @@ func (p *Plugin) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger.Info("hint created", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "challenge_id", chalID)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -133,6 +135,7 @@ func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger.Info("hint updated", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "hint_id", hintID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

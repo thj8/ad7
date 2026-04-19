@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"ad7/internal/logger"
+
 	"github.com/go-chi/httprate"
 )
 
@@ -38,10 +40,13 @@ func LimitByUserID(requests int, window time.Duration) func(http.Handler) http.H
 		httprate.WithKeyFuncs(func(r *http.Request) (string, error) {
 			userID := UserID(r)
 			if userID == "" {
-				// Fallback to IP if no user ID in context
 				return httprate.KeyByIP(r)
 			}
 			return userID, nil
+		}),
+		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			logger.Warn("rate limited", "user", UserID(r), "ip", r.RemoteAddr, "endpoint", r.URL.Path)
+			http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)
 		}),
 	)
 }

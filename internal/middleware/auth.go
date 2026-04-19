@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"ad7/internal/logger"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -44,6 +46,7 @@ func (a *Auth) Authenticate(next http.Handler) http.Handler {
 		// 提取 Authorization 头
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
+			logger.Warn("auth failed", "error", "missing token")
 			http.Error(w, `{"error":"missing token"}`, http.StatusUnauthorized)
 			return
 		}
@@ -56,12 +59,14 @@ func (a *Auth) Authenticate(next http.Handler) http.Handler {
 			return a.secret, nil
 		})
 		if err != nil || !token.Valid {
+			logger.Warn("auth failed", "error", "invalid token")
 			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 			return
 		}
 		// 从 claims 中提取用户 ID 和角色
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
+			logger.Warn("auth failed", "error", "invalid claims")
 			http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
 			return
 		}
@@ -80,7 +85,9 @@ func (a *Auth) Authenticate(next http.Handler) http.Handler {
 func (a *Auth) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, _ := r.Context().Value(CtxRole).(string)
+		userID, _ := r.Context().Value(CtxUserID).(string)
 		if role != a.adminRole {
+			logger.Warn("access denied", "user", userID, "role", role, "required_role", a.adminRole)
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			return
 		}

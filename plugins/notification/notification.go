@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
 	"ad7/internal/pluginutil"
@@ -89,5 +90,6 @@ func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	logger.Info("notification created", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "competition_id", compID)
 	w.WriteHeader(http.StatusCreated)
 }
