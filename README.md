@@ -33,7 +33,16 @@ go run ./cmd/seed/
 # 运行服务器
 go run ./cmd/server -config config.yaml
 
-# 尝试演示脚本
+# 尝试测试脚本
+./scripts/test-competitions.sh   # 比赛CRUD + 开始/结束
+./scripts/test-challenges.sh     # 题目CRUD
+./scripts/test-submissions.sh    # Flag提交
+./scripts/test-leaderboard.sh    # 排行榜
+./scripts/test-notifications.sh  # 通知
+./scripts/test-hints.sh          # 提示
+./scripts/test-analytics.sh      # 分析
+
+# 或一键跑全部
 ./scripts/demo.sh
 ```
 
@@ -64,7 +73,7 @@ go run ./cmd/server -config config.yaml
 |--------|------|-------------|
 | POST | `/api/v1/challenges/{id}/submit` | 提交 Flag（全局） |
 | POST | `/api/v1/competitions/{comp_id}/challenges/{id}/submit` | 提交 Flag（比赛内） |
-| GET | `/api/v1/admin/submissions` | 列出提交（管理员） |
+| GET | `/api/v1/admin/competitions/{id}/submissions` | 列出比赛提交（管理员） |
 
 ### 比赛（管理员）
 
@@ -76,6 +85,8 @@ go run ./cmd/server -config config.yaml
 | GET | `/api/v1/admin/competitions` | 列出所有比赛 |
 | POST | `/api/v1/admin/competitions/{id}/challenges` | 向比赛添加题目 |
 | DELETE | `/api/v1/admin/competitions/{id}/challenges/{challenge_id}` | 从比赛移除题目 |
+| POST | `/api/v1/admin/competitions/{id}/start` | 开始比赛 |
+| POST | `/api/v1/admin/competitions/{id}/end` | 结束比赛 |
 
 ### 比赛（用户）
 
@@ -146,7 +157,14 @@ go run ./cmd/server -config config.yaml
 │   ├── server/           # 入口点
 │   └── seed/             # 测试数据生成器
 ├── scripts/
-│   └── demo.sh           # 演示：查询比赛、提交 Flag、排行榜
+│   ├── demo.sh           # 一键运行所有测试脚本
+│   ├── test-competitions.sh  # 比赛CRUD + 开始/结束
+│   ├── test-challenges.sh    # 题目CRUD
+│   ├── test-submissions.sh   # Flag提交 + 记录
+│   ├── test-leaderboard.sh   # 排行榜
+│   ├── test-notifications.sh # 通知
+│   ├── test-hints.sh         # 提示CRUD
+│   └── test-analytics.sh     # 分析
 ├── internal/
 │   ├── config/           # YAML 配置加载
 │   ├── handler/          # HTTP 处理器
