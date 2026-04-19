@@ -23,5 +23,7 @@ func RegisterCompetitionRoutes(r chi.Router, deps RouteDeps) {
 		r.Delete("/competitions/{id}", deps.CompetitionH.Delete)
 		r.Post("/competitions/{id}/challenges", deps.CompetitionH.AddChallenge)
 		r.Delete("/competitions/{id}/challenges/{challenge_id}", deps.CompetitionH.RemoveChallenge)
+		r.Post("/competitions/{id}/start", deps.CompetitionH.Start)
+		r.Post("/competitions/{id}/end", deps.CompetitionH.End)
 	})
 }

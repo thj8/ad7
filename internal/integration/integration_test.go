@@ -100,6 +100,8 @@ func TestMain(m *testing.M) {
 			r.Delete("/competitions/{id}", compH.Delete)
 			r.Post("/competitions/{id}/challenges", compH.AddChallenge)
 			r.Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
+			r.Post("/competitions/{id}/start", compH.Start)
+			r.Post("/competitions/{id}/end", compH.End)
 		})
 	})
 
