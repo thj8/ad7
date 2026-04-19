@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"ad7/internal/logger"
+	"ad7/internal/middleware"
 	"ad7/internal/model"
 	"ad7/internal/service"
 )
@@ -102,6 +104,7 @@ func (h *ChallengeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	logger.Info("challenge created", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "challenge_id", id, "title", req.Title)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -153,6 +156,7 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	logger.Info("challenge updated", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "challenge_id", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -168,6 +172,7 @@ func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	logger.Info("challenge deleted", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "challenge_id", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

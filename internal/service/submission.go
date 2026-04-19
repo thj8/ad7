@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"ad7/internal/event"
+	"ad7/internal/logger"
 	"ad7/internal/model"
 	"ad7/internal/store"
 )
@@ -56,6 +57,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		return "", err
 	}
 	if solved {
+		logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "already_solved")
 		return ResultAlreadySolved, nil
 	}
 
@@ -87,8 +89,10 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 			SubmittedAt:   time.Now(),
 			Ctx:           ctx,
 		})
+		logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "correct")
 		return ResultCorrect, nil
 	}
+	logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "incorrect")
 	return ResultIncorrect, nil
 }
 
