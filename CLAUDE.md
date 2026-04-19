@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本文件为 Claude Code (claude.ai/code) 提供使用本仓库代码的指导。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 命令
 
@@ -15,71 +15,85 @@ go run ./cmd/server -config config.yaml
 go run ./cmd/seed/
 TEST_DSN="root:pass@tcp(host:3306)/ctf?parseTime=true" go run ./cmd/seed/
 
-# 演示脚本（查询比赛、提交Flag、查看排行榜）
+# 测试脚本（每个资源领域独立测试）
+./scripts/test-competitions.sh   # 比赛CRUD + 开始/结束
+./scripts/test-challenges.sh     # 题目CRUD
+./scripts/test-submissions.sh    # Flag提交 + 记录
+./scripts/test-leaderboard.sh    # 排行榜
+./scripts/test-notifications.sh  # 通知
+./scripts/test-hints.sh          # 提示CRUD
+./scripts/test-analytics.sh      # 分析
+
+# 一键跑全部测试脚本
 ./scripts/demo.sh
-BASE_URL=http://host:8080 ./scripts/demo.sh
+./scripts/demo.sh competitions submissions  # 只跑指定模块
+
+# 环境变量
+BASE_URL=http://host:8080 JWT_SECRET=xxx ./scripts/test-leaderboard.sh
 
 # 运行所有测试
 go test ./...
 
-# 仅运行集成测试（需要 MySQL 在 192.168.5.44）
+# 仅运行集成测试（需要 MySQL）
 go test ./internal/integration/... -v -count=1
 
 # 运行单个测试
 go test ./internal/integration/... -v -run TestSubmitFlag -count=1
 
 # 应用数据库架构
-mysql -h 192.168.5.44 -u root -pasfdsfedarjeiowvgfsd ctf < sql/schema.sql
+mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 ```
 
 ## 架构
 
-分层 Go 服务：**handler → service → store** + **插件系统**
+分层 Go 服务：**router → handler → service → store** + **插件系统** + **事件系统**
 
-- `cmd/server/main.go` — 组装所有组件：加载配置、打开数据库、创建 store/service/handler、注册 chi 路由、加载插件、启动 HTTP 服务器
-- `cmd/seed/main.go` — 填充测试数据：50个题目、15个比赛、每个比赛30个用户，解题率差异化（顶部用户72%）
-- `internal/config/` — YAML 配置加载（`server.port`、`db.*`、`jwt.secret`、`jwt.admin_role`）
-- `internal/model/` — 领域结构体：`Challenge`、`Submission`、`Notification`、`Competition`、`CompetitionChallenge`。`Flag` 字段有 `json:"-"` 所以永远不会出现在 API 响应中。所有实体使用 UUID `res_id`（32字符十六进制字符串，无连字符）作为公开 ID。
-- `internal/store/` — `store.go` 定义 `ChallengeStore`、`SubmissionStore`、`CompetitionStore` 接口；`mysql.go` 在单个 `*Store` 结构体上实现所有接口
-- `internal/service/` — 业务逻辑：`ChallengeService`（CRUD）、`SubmissionService`（Flag验证、比赛内提交）、`CompetitionService`（比赛CRUD、题目分配）
-- `internal/handler/` — 仅 HTTP 层；使用单独的请求结构体来接收模型上有 `json:"-"` 的字段
-- `internal/middleware/` — JWT 认证（`Authenticate`）和管理员关卡（`RequireAdmin`）；从 claims 中提取 `sub`→`user_id` 和 `role` 到上下文
-- `internal/plugin/` — `Plugin` 接口：`Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`
-- `internal/snowflake/` — UUID v4 生成器（32字符十六进制字符串，无连字符）
-- `plugins/leaderboard/` — 每个比赛的排行榜，按总分降序排列，同分按最早解题时间升序排列
-- `plugins/notification/` — 每个比赛的通知，管理员创建，所有用户可查看
-- `plugins/hints/` — 题目提示系统，管理员管理，用户查看可见提示
-- `plugins/dashboard/` — 比赛仪表盘，含一血追踪
-- `plugins/analytics/` — 比赛分析（概览、分类、用户、题目）
+**核心层：**
+- `cmd/server/main.go` — 按顺序组装：config → logger → store → middleware → services → handlers → router → plugins → HTTP server
+- `internal/router/` — 路由注册，使用 `RouteDeps` 结构体封装所有依赖。`api.go` 创建 `/api/v1` 路由组，按领域拆分为 `challenges.go`、`competitions.go`、`submissions.go`
+- `internal/model/` — 领域结构体，全部嵌入 `BaseModel`（`id`、`res_id`、`created_at`、`updated_at`、`is_deleted`）。`Flag` 字段 `json:"-"` 永不暴露
+- `internal/store/` — `store.go` 定义接口；`mysql.go` 单个 `*Store` 实现所有接口
+- `internal/service/` — 业务逻辑层。`SubmissionService.SubmitInComp` 在正确提交时发布 `EventCorrectSubmission`
+- `internal/handler/` — HTTP 层，使用单独的请求结构体接收 `json:"-"` 的字段
+- `internal/config/` — YAML 配置（`server.port`、`db.*`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
+- `internal/uuid/` — UUID v4 生成器（32字符十六进制，无连字符）
+- `internal/logger/` — 基于 `log/slog` 的双输出日志（stdout + 可选文件），支持级别配置
+
+**中间件：**
+- `internal/middleware/auth.go` — JWT 认证（`Authenticate`）和管理员关卡（`RequireAdmin`）。从 claims 提取 `sub`→`user_id` 和 `role` 到 context
+- `internal/middleware/ratelimit.go` — 基于 `httprate` 的限流，支持按 IP 和按用户 ID，用 `r.With(...)` 内联中间件应用到提交路由
+
+**插件系统：**
+- `internal/plugin/` — `Plugin` 接口：`Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`。插件接收原始 `*sql.DB`，绕过 service 层直接写 SQL
+- `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口（支持事务）、共享查询函数
+- `plugins/leaderboard/` — 每个比赛的排行榜（总分降序，同分按解题时间升序）
+- `plugins/notification/` — 每个比赛的通知（管理员创建，所有用户查看）
+- `plugins/hints/` — 题目提示（管理员管理，用户查看可见提示）
+- `plugins/analytics/` — 比赛分析（概览、分类、用户、题目四个端点）
+- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，异步更新排名
+
+**事件系统：**
+- `internal/event/` — 进程内 pub/sub，基于 `sync.RWMutex`。`Publish` 在独立 goroutine 中调用订阅者，不阻塞发布者。当前事件类型：`EventCorrectSubmission`
 
 ## 关键设计决策
 
-- **UUID res_id**：所有实体使用 `res_id VARCHAR(32)`（UUID v4，32字符十六进制字符串无连字符）作为公开 ID。自增 `id` 列仅内部使用（`json:"-"`）。API 路径和响应仅使用 `res_id`。
-- **Flag 字段**：`model.Challenge.Flag` 是 `json:"-"`。Handler 使用单独的请求结构体（`createRequest`、`updateRequest`）从传入的 JSON 解码 flag，然后在传递给 service 之前手动赋值给模型。
-- **单一 store 结构体**：`*store.Store` 实现所有 store 接口。在 `main.go` 中传递给所有 service。
-- **管理员认证**：JWT 中间件读取 `role` claim；`RequireAdmin` 将其与 `cfg.JWT.AdminRole`（默认 `"admin"`）比较。用户身份来自 `sub` claim。
-- **比赛范围**：没有全局排行榜或全局通知。所有内容都限定在比赛范围内。为了向后兼容，仍支持比赛外的提交。
-- **插件系统**：插件实现 `Plugin` 接口并在 `main.go` 中注册自己的 chi 路由。它们接收 `*sql.DB` 和 `*middleware.Auth` 用于直接数据库访问和路由保护。
-- **无外键**：根据项目约束，数据库不使用外键约束。
-- **输入验证**：字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）。`parseID` 在无效输入时返回 400。通知 `message` 是必填的。
-- **系统日志**：关键操作都必须有操作日志保存
+- **UUID res_id**：所有实体使用 `res_id VARCHAR(32)` 作为公开 ID。自增 `id` 列 `json:"-"` 仅内部使用。API 路径和响应仅使用 `res_id`
+- **BaseModel**：所有 model 嵌入 `BaseModel`（`id`、`res_id`、`created_at`、`updated_at`、`is_deleted`）。所有查询包含 `WHERE is_deleted = 0` 软删除过滤
+- **Flag 字段**：`model.Challenge.Flag` 是 `json:"-"`。Handler 使用单独请求结构体解码 flag，手动赋值给 model
+- **单一 store**：`*store.Store` 实现所有 store 接口，传递给所有 service
+- **比赛范围**：没有全局排行榜或通知。所有内容限定在比赛范围内。向后兼容支持比赛外提交
+- **插件直连 DB**：插件接收 `*sql.DB` 直接写 SQL，通过 `pluginutil` 共享通用查询
+- **无外键**：数据库不使用外键约束
+- **系统日志**：关键操作必须有操作日志
+- **限流**：提交端点有按用户 ID 的限流（未认证时回退到 IP 限流）
 
 ## 集成测试
 
-`internal/integration/` 中的测试连接到真实的 MySQL 实例。16个测试覆盖：
-- 题目 CRUD（列表、获取、提交、管理员CRUD、提交列表）
-- 比赛 CRUD
-- 比赛题目分配
-- 比赛内 Flag 提交
-- 每个比赛的排行榜
-- 每个比赛的通知
-
-`testDSN` 从 `TEST_DSN` 环境变量读取，回退到硬编码默认值。`testSecret` 与生产密钥分开。
-
-每个测试调用 `cleanup(t)`，按依赖顺序删除所有表中的数据。
+`internal/integration/` 连接真实 MySQL。每个测试调用 `cleanup(t)` 按依赖顺序清除数据。`testDSN` 从 `TEST_DSN` 环境变量读取，`testSecret` 与生产密钥分开。
 
 ## 约束
 - **新功能**: 每次添加新功能，都必须添加完整的测试用例
-- **bug**: 改一个bug，要写一个测试用例，保证此bug不会再次发生
-- **Model基类**: 所有model都要基于BaseModel,具有id，res_id, created_at, updated_at, is_deleted.
-- **函数参数**： 所有函数参数不能多于4个，采用结构体封装
+- **bug**: 改一个 bug，要写一个测试用例，保证此 bug 不会再次发生
+- **Model基类**: 所有 model 都要基于 BaseModel
+- **函数参数**: 所有函数参数不能多于4个，采用结构体封装
+- **输入验证**: 字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）
