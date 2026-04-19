@@ -89,4 +89,8 @@ type CompetitionStore interface {
 	// ListCompChallenges 查询指定比赛中所有已启用且未删除的题目。
 	// 通过 competition_challenges 关联表 JOIN 查询。
 	ListCompChallenges(ctx context.Context, compID string) ([]model.Challenge, error)
+
+	// SetActive 设置比赛的 is_active 状态。
+	// 通过 res_id 定位，仅更新未删除的比赛。
+	SetActive(ctx context.Context, resID string, active bool) error
 }

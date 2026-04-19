@@ -5,10 +5,15 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
+	"ad7/internal/logger"
 	"ad7/internal/model"
 	"ad7/internal/store"
 )
+
+// ErrConflict 表示操作冲突（如重复开始/结束比赛）。
+var ErrConflict = errors.New("conflict")
 
 // CompetitionService 封装比赛相关的业务逻辑。
 // 持有 CompetitionStore 接口用于数据访问。
@@ -24,12 +29,30 @@ func NewCompetitionService(s store.CompetitionStore) *CompetitionService {
 
 // List 返回所有比赛（含未激活的），供管理员使用。
 func (s *CompetitionService) List(ctx context.Context) ([]model.Competition, error) {
-	return s.store.ListCompetitions(ctx)
+	cs, err := s.store.ListCompetitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cs {
+		s.syncStatus(ctx, &cs[i])
+	}
+	return cs, nil
 }
 
 // ListActive 返回所有已激活的比赛，供普通用户查看。
 func (s *CompetitionService) ListActive(ctx context.Context) ([]model.Competition, error) {
-	return s.store.ListActiveCompetitions(ctx)
+	cs, err := s.store.ListActiveCompetitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var active []model.Competition
+	for i := range cs {
+		s.syncStatus(ctx, &cs[i])
+		if cs[i].IsActive {
+			active = append(active, cs[i])
+		}
+	}
+	return active, nil
 }
 
 // Get 根据 res_id 获取单个比赛详情。
@@ -42,6 +65,7 @@ func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Comp
 	if c == nil {
 		return nil, ErrNotFound
 	}
+	s.syncStatus(ctx, c)
 	return c, nil
 }
 
@@ -119,4 +143,74 @@ func (s *CompetitionService) RemoveChallenge(ctx context.Context, compID, chalID
 // ListChallenges 查询指定比赛中所有已启用的题目。
 func (s *CompetitionService) ListChallenges(ctx context.Context, compID string) ([]model.Challenge, error) {
 	return s.store.ListCompChallenges(ctx, compID)
+}
+
+// StartCompetition 手动开始比赛，设置 is_active = true。
+// 如果比赛已激活返回 ErrConflict，不存在返回 ErrNotFound。
+// 直接读取数据库，不经过 syncStatus，避免自动状态覆盖手动操作。
+func (s *CompetitionService) StartCompetition(ctx context.Context, resID string) (*model.Competition, error) {
+	c, err := s.store.GetCompetitionByID(ctx, resID)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, ErrNotFound
+	}
+	if c.IsActive {
+		return nil, ErrConflict
+	}
+	if err := s.store.SetActive(ctx, resID, true); err != nil {
+		return nil, err
+	}
+	c.IsActive = true
+	logger.Info("competition started", "competition_id", resID)
+	return c, nil
+}
+
+// EndCompetition 手动结束比赛，设置 is_active = false。
+// 如果比赛已结束返回 ErrConflict，不存在返回 ErrNotFound。
+// 直接读取数据库，不经过 syncStatus，避免自动状态覆盖手动操作。
+func (s *CompetitionService) EndCompetition(ctx context.Context, resID string) (*model.Competition, error) {
+	c, err := s.store.GetCompetitionByID(ctx, resID)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, ErrNotFound
+	}
+	if !c.IsActive {
+		return nil, ErrConflict
+	}
+	if err := s.store.SetActive(ctx, resID, false); err != nil {
+		return nil, err
+	}
+	c.IsActive = false
+	logger.Info("competition ended", "competition_id", resID)
+	return c, nil
+}
+
+// syncStatus 检查比赛时间并自动更新状态。
+// 激活条件：start_time <= now && end_time > now && is_active == false
+// 结束条件：end_time <= now && is_active == true
+// 仅在状态实际变更时才写库，修改传入的 Competition 的 IsActive 字段。
+func (s *CompetitionService) syncStatus(ctx context.Context, c *model.Competition) {
+	now := time.Now()
+	// 自动激活
+	if !c.IsActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
+		if err := s.store.SetActive(ctx, c.ResID, true); err != nil {
+			logger.Error("failed to auto-activate competition", "competition_id", c.ResID, "error", err)
+			return
+		}
+		c.IsActive = true
+		logger.Info("competition auto-activated", "competition_id", c.ResID)
+	}
+	// 自动结束
+	if c.IsActive && !now.Before(c.EndTime) {
+		if err := s.store.SetActive(ctx, c.ResID, false); err != nil {
+			logger.Error("failed to auto-end competition", "competition_id", c.ResID, "error", err)
+			return
+		}
+		c.IsActive = false
+		logger.Info("competition auto-ended", "competition_id", c.ResID)
+	}
 }
