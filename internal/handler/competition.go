@@ -262,3 +262,53 @@ func (h *CompetitionHandler) RemoveChallenge(w http.ResponseWriter, r *http.Requ
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// Start 处理 POST /api/v1/admin/competitions/{id}/start 请求（管理员）。
+// 手动激活指定比赛。返回更新后的比赛信息。
+// 如果比赛已激活返回 409，不存在返回 404。
+func (h *CompetitionHandler) Start(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	c, err := h.svc.StartCompetition(r.Context(), id)
+	if err == service.ErrNotFound {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err == service.ErrConflict {
+		writeError(w, http.StatusConflict, "competition already started")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// End 处理 POST /api/v1/admin/competitions/{id}/end 请求（管理员）。
+// 手动结束指定比赛。返回更新后的比赛信息。
+// 如果比赛已结束返回 409，不存在返回 404。
+func (h *CompetitionHandler) End(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	c, err := h.svc.EndCompetition(r.Context(), id)
+	if err == service.ErrNotFound {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err == service.ErrConflict {
+		writeError(w, http.StatusConflict, "competition already ended")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
