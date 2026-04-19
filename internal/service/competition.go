@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"ad7/internal/model"
 	"ad7/internal/store"
@@ -28,12 +29,30 @@ func NewCompetitionService(s store.CompetitionStore) *CompetitionService {
 
 // List 返回所有比赛（含未激活的），供管理员使用。
 func (s *CompetitionService) List(ctx context.Context) ([]model.Competition, error) {
-	return s.store.ListCompetitions(ctx)
+	cs, err := s.store.ListCompetitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cs {
+		s.syncStatus(ctx, &cs[i])
+	}
+	return cs, nil
 }
 
 // ListActive 返回所有已激活的比赛，供普通用户查看。
 func (s *CompetitionService) ListActive(ctx context.Context) ([]model.Competition, error) {
-	return s.store.ListActiveCompetitions(ctx)
+	cs, err := s.store.ListActiveCompetitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var active []model.Competition
+	for i := range cs {
+		s.syncStatus(ctx, &cs[i])
+		if cs[i].IsActive {
+			active = append(active, cs[i])
+		}
+	}
+	return active, nil
 }
 
 // Get 根据 res_id 获取单个比赛详情。
@@ -46,6 +65,7 @@ func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Comp
 	if c == nil {
 		return nil, ErrNotFound
 	}
+	s.syncStatus(ctx, c)
 	return c, nil
 }
 
@@ -159,4 +179,24 @@ func (s *CompetitionService) EndCompetition(ctx context.Context, resID string) (
 	c.IsActive = false
 	slog.Info("competition ended", "competition_id", resID)
 	return c, nil
+}
+
+// syncStatus 检查比赛时间并自动更新状态。
+// 激活条件：start_time <= now && end_time > now && is_active == false
+// 结束条件：end_time <= now && is_active == true
+// 仅在状态实际变更时才写库，修改传入的 Competition 的 IsActive 字段。
+func (s *CompetitionService) syncStatus(ctx context.Context, c *model.Competition) {
+	now := time.Now()
+	// 自动激活
+	if !c.IsActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
+		c.IsActive = true
+		_ = s.store.SetActive(ctx, c.ResID, true)
+		slog.Info("competition auto-activated", "competition_id", c.ResID)
+	}
+	// 自动结束
+	if c.IsActive && !now.Before(c.EndTime) {
+		c.IsActive = false
+		_ = s.store.SetActive(ctx, c.ResID, false)
+		slog.Info("competition auto-ended", "competition_id", c.ResID)
+	}
 }
