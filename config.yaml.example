@@ -16,3 +16,7 @@ rate_limit:
   submission:
     requests: 3
     window: 10s
+
+log:
+  # path: "logs/server.log"    # 日志文件路径，注释掉则仅输出到 stdout
+  level: "info"                # debug / info / warn / error

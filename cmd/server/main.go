@@ -13,6 +13,7 @@ import (
 
 	"ad7/internal/config"
 	"ad7/internal/handler"
+	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
 	"ad7/internal/router"
@@ -45,6 +46,11 @@ func main() {
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+
+	// 初始化日志系统（stdout + 可选文件输出）
+	if err := logger.Init(cfg.Log); err != nil {
+		log.Fatalf("init logger: %v", err)
 	}
 
 	// 通过 DSN 连接 MySQL 数据库
@@ -95,6 +101,6 @@ func main() {
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	log.Printf("listening on %s", addr)
+	logger.Info("server starting", "port", cfg.Server.Port)
 	log.Fatal(http.ListenAndServe(addr, r))
 }

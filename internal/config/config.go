@@ -16,6 +16,7 @@ type Config struct {
 	DB        DBConfig        `yaml:"db"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Log       LogConfig       `yaml:"log"`
 }
 
 // ServerConfig 定义 HTTP 服务器的监听端口。
@@ -56,6 +57,12 @@ type RateLimitConfig struct {
 	Submission RateLimitRule `yaml:"submission"` // Flag 提交限流规则
 }
 
+// LogConfig 定义日志输出配置。
+type LogConfig struct {
+	Path  string `yaml:"path"`  // 日志文件路径，空则仅输出到 stdout
+	Level string `yaml:"level"` // 日志级别：debug / info / warn / error
+}
+
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
 // 参数：
 //   - path: 配置文件的文件系统路径
@@ -88,6 +95,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.RateLimit.Submission.Window == 0 {
 		cfg.RateLimit.Submission.Window = 10 * time.Second
+	}
+	// 设置默认日志级别
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info"
 	}
 	return &cfg, nil
 }
