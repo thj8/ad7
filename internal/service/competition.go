@@ -197,14 +197,20 @@ func (s *CompetitionService) syncStatus(ctx context.Context, c *model.Competitio
 	now := time.Now()
 	// 自动激活
 	if !c.IsActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
+		if err := s.store.SetActive(ctx, c.ResID, true); err != nil {
+			slog.Error("failed to auto-activate competition", "competition_id", c.ResID, "error", err)
+			return
+		}
 		c.IsActive = true
-		_ = s.store.SetActive(ctx, c.ResID, true)
 		slog.Info("competition auto-activated", "competition_id", c.ResID)
 	}
 	// 自动结束
 	if c.IsActive && !now.Before(c.EndTime) {
+		if err := s.store.SetActive(ctx, c.ResID, false); err != nil {
+			slog.Error("failed to auto-end competition", "competition_id", c.ResID, "error", err)
+			return
+		}
 		c.IsActive = false
-		_ = s.store.SetActive(ctx, c.ResID, false)
 		slog.Info("competition auto-ended", "competition_id", c.ResID)
 	}
 }
