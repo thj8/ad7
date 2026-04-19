@@ -5,10 +5,14 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"ad7/internal/model"
 	"ad7/internal/store"
 )
+
+// ErrConflict 表示操作冲突（如重复开始/结束比赛）。
+var ErrConflict = errors.New("conflict")
 
 // CompetitionService 封装比赛相关的业务逻辑。
 // 持有 CompetitionStore 接口用于数据访问。
@@ -119,4 +123,40 @@ func (s *CompetitionService) RemoveChallenge(ctx context.Context, compID, chalID
 // ListChallenges 查询指定比赛中所有已启用的题目。
 func (s *CompetitionService) ListChallenges(ctx context.Context, compID string) ([]model.Challenge, error) {
 	return s.store.ListCompChallenges(ctx, compID)
+}
+
+// StartCompetition 手动开始比赛，设置 is_active = true。
+// 如果比赛已激活返回 ErrConflict，不存在返回 ErrNotFound。
+func (s *CompetitionService) StartCompetition(ctx context.Context, resID string) (*model.Competition, error) {
+	c, err := s.Get(ctx, resID)
+	if err != nil {
+		return nil, err
+	}
+	if c.IsActive {
+		return nil, ErrConflict
+	}
+	if err := s.store.SetActive(ctx, resID, true); err != nil {
+		return nil, err
+	}
+	c.IsActive = true
+	slog.Info("competition started", "competition_id", resID)
+	return c, nil
+}
+
+// EndCompetition 手动结束比赛，设置 is_active = false。
+// 如果比赛已结束返回 ErrConflict，不存在返回 ErrNotFound。
+func (s *CompetitionService) EndCompetition(ctx context.Context, resID string) (*model.Competition, error) {
+	c, err := s.Get(ctx, resID)
+	if err != nil {
+		return nil, err
+	}
+	if !c.IsActive {
+		return nil, ErrConflict
+	}
+	if err := s.store.SetActive(ctx, resID, false); err != nil {
+		return nil, err
+	}
+	c.IsActive = false
+	slog.Info("competition ended", "competition_id", resID)
+	return c, nil
 }
