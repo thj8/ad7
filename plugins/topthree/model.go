@@ -14,7 +14,7 @@ type topThreeRecord struct {
 	CompetitionID string `json:"-"`         // 所属比赛 ID，不暴露给 API
 	ChallengeID   string `json:"-"`         // 题目 ID，不暴露给 API
 	UserID        string `json:"user_id"`   // 三血获得者 ID
-	Rank          int    `json:"rank"`       // 排名（1=一血，2=二血，3=三血）
+	Ranking       int    `json:"ranking"`   // 排名（1=一血，2=二血，3=三血）
 }
 
 // challengeTopThree 表示一道题目及其三血排名信息。
@@ -28,7 +28,7 @@ type challengeTopThree struct {
 
 // topThreeEntry 表示一个三血排名条目。
 type topThreeEntry struct {
-	Rank      int       `json:"rank"`       // 排名（1/2/3）
+	Ranking   int       `json:"ranking"`    // 排名（1/2/3）
 	UserID    string    `json:"user_id"`    // 获得者 ID
 	CreatedAt time.Time `json:"created_at"` // 获得时间
 }

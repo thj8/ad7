@@ -6,6 +6,7 @@ package topthree
 import (
 	"context"
 	"database/sql"
+	"log"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -40,14 +41,16 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	})
 }
 
-// getCurrentTopThree 查询指定比赛中某道题目的当前三血记录。
+// getCurrentTopThreeForUpdate 在事务中查询指定比赛中某道题目的当前三血记录。
+// 使用 SELECT ... FOR UPDATE 加行锁，防止并发修改导致竞态条件。
 // 返回排名 1-3 的记录（按排名升序）。
-func (p *Plugin) getCurrentTopThree(ctx context.Context, compID, chalID string) ([]topThreeRecord, error) {
-	rows, err := p.db.QueryContext(ctx, `
+func getCurrentTopThreeForUpdate(ctx context.Context, tx *sql.Tx, compID, chalID string) ([]topThreeRecord, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT id, res_id, competition_id, challenge_id, user_id, ranking, created_at, updated_at, is_deleted
 		FROM topthree_records
 		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
 		ORDER BY ranking ASC
+		FOR UPDATE
 	`, compID, chalID)
 	if err != nil {
 		return nil, err
@@ -57,7 +60,7 @@ func (p *Plugin) getCurrentTopThree(ctx context.Context, compID, chalID string) 
 	var records []topThreeRecord
 	for rows.Next() {
 		var r topThreeRecord
-		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &r.Rank, &r.CreatedAt, &r.UpdatedAt, &r.IsDeleted)
+		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &r.Ranking, &r.CreatedAt, &r.UpdatedAt, &r.IsDeleted)
 		if err != nil {
 			return nil, err
 		}
@@ -99,27 +102,21 @@ func calculateNewRank(current []topThreeRecord, submitTime time.Time) int {
 
 // updateTopThreeRequest 是更新三血排名的请求参数。
 type updateTopThreeRequest struct {
-	CompID      string           // 比赛ID
-	ChalID      string           // 题目ID
-	UserID      string           // 用户ID
-	NewRank     int              // 新排名（1-3）
-	SubmitTime  time.Time        // 提交时间
-	Current     []topThreeRecord // 当前三血记录
+	CompID     string // 比赛ID
+	ChalID     string // 题目ID
+	UserID     string // 用户ID
+	NewRank    int    // 新排名（1-3）
+	SubmitTime time.Time // 提交时间
+	Current    []topThreeRecord // 当前三血记录
 }
 
-// updateTopThree 在事务中更新三血排名。
+// updateTopThreeInTx 在已有事务中更新三血排名。
 // 如果新排名在第 1 或第 2 位：
 //   - 原第 3 名被软删除
 //   - 比新排名低的原有记录排名 +1
 //
 // 然后插入新的排名记录。
-func (p *Plugin) updateTopThree(ctx context.Context, req *updateTopThreeRequest) error {
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+func updateTopThreeInTx(ctx context.Context, tx *sql.Tx, req *updateTopThreeRequest) error {
 	// 如果插入位置在已有记录范围内，需要移动或删除现有记录
 	if req.NewRank <= len(req.Current) {
 		// 如果新排名是第 1 或第 2，且当前已满 3 人，则软删除第 3 名
@@ -152,30 +149,36 @@ func (p *Plugin) updateTopThree(ctx context.Context, req *updateTopThreeRequest)
 
 	// 插入新的三血记录
 	resID := uuid.Next()
-	_, err = tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO topthree_records
 		(res_id, competition_id, challenge_id, user_id, ranking, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, resID, req.CompID, req.ChalID, req.UserID, req.NewRank, req.SubmitTime)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return err
 }
 
 // handleCorrectSubmission 处理正确提交事件，更新三血排名。
+// 在单个事务中完成读取和写入，避免并发竞态条件。
 func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	compID := e.CompetitionID
 	chalID := e.ChallengeID
 	userID := e.UserID
-	submitTime := time.Now()
+	submitTime := e.SubmittedAt
 
 	ctx := context.Background()
 
-	// 获取当前三血记录
-	current, err := p.getCurrentTopThree(ctx, compID, chalID)
+	// 开启事务，将读取和写入放在同一事务中
+	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
+		log.Printf("[topthree] 开启事务失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
+		return
+	}
+	defer tx.Rollback()
+
+	// 在事务中加锁读取当前三血记录
+	current, err := getCurrentTopThreeForUpdate(ctx, tx, compID, chalID)
+	if err != nil {
+		log.Printf("[topthree] 查询三血记录失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
 		return
 	}
 
@@ -190,13 +193,20 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 		return // 不入榜
 	}
 
-	// 更新三血排名
-	_ = p.updateTopThree(ctx, &updateTopThreeRequest{
+	// 在同一事务中更新三血排名
+	if err := updateTopThreeInTx(ctx, tx, &updateTopThreeRequest{
 		CompID:     compID,
 		ChalID:     chalID,
 		UserID:     userID,
 		NewRank:    newRank,
 		SubmitTime: submitTime,
 		Current:    current,
-	})
+	}); err != nil {
+		log.Printf("[topthree] 更新三血排名失败: comp=%s chal=%s user=%s rank=%d err=%v", compID, chalID, userID, newRank, err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("[topthree] 提交事务失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
+	}
 }

@@ -1,10 +1,11 @@
 package topthree
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"ad7/internal/pluginutil"
 )
 
 // getTopThree 处理获取比赛三血排名的请求。
@@ -12,8 +13,8 @@ import (
 func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	// 验证比赛 ID 格式（32 字符 UUID）
-	if len(compID) != 32 {
-		http.Error(w, `{"error":"invalid competition id"}`, http.StatusBadRequest)
+	if err := pluginutil.ParseID(compID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
 
@@ -27,58 +28,59 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 		WHERE cc.competition_id = ? AND c.is_deleted = 0
 	`, compID)
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer chalRows.Close()
 
-	var challenges []challengeTopThree
+	// 收集题目信息
+	challengeMap := make(map[string]*challengeTopThree)
+	var chalOrder []string
 	for chalRows.Next() {
 		var ct challengeTopThree
-		err := chalRows.Scan(&ct.ChallengeID, &ct.Title, &ct.Category, &ct.Score)
-		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		if err := chalRows.Scan(&ct.ChallengeID, &ct.Title, &ct.Category, &ct.Score); err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
-		challenges = append(challenges, ct)
+		challengeMap[ct.ChallengeID] = &ct
+		chalOrder = append(chalOrder, ct.ChallengeID)
 	}
 
-	// 为每道题目查询三血排名
-	for i := range challenges {
-		chal := &challenges[i]
-		rows, err := p.db.QueryContext(ctx, `
-			SELECT user_id, ranking, created_at
-			FROM topthree_records
-			WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
-			ORDER BY ranking ASC
-		`, compID, chal.ChallengeID)
-		if err != nil {
-			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+	// 单次查询获取该比赛所有三血记录（消除 N+1 问题）
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT challenge_id, user_id, ranking, created_at
+		FROM topthree_records
+		WHERE competition_id = ? AND is_deleted = 0
+		ORDER BY ranking ASC
+	`, compID)
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var chalID string
+		var e topThreeEntry
+		if err := rows.Scan(&chalID, &e.UserID, &e.Ranking, &e.CreatedAt); err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
-
-		var topThree []topThreeEntry
-		for rows.Next() {
-			var e topThreeEntry
-			err := rows.Scan(&e.UserID, &e.Rank, &e.CreatedAt)
-			if err != nil {
-				rows.Close()
-				http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-				return
-			}
-			topThree = append(topThree, e)
+		if ct, ok := challengeMap[chalID]; ok {
+			ct.TopThree = append(ct.TopThree, e)
 		}
-		rows.Close()
-
-		chal.TopThree = topThree
 	}
 
-	// 构建响应
+	// 按题目顺序构建响应
+	challenges := make([]challengeTopThree, 0, len(chalOrder))
+	for _, id := range chalOrder {
+		challenges = append(challenges, *challengeMap[id])
+	}
+
 	resp := topThreeResponse{
 		CompetitionID: compID,
 		Challenges:    challenges,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	pluginutil.WriteJSON(w, http.StatusOK, resp)
 }

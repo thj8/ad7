@@ -6,6 +6,7 @@ package event
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // EventType 是事件类型的字符串枚举。
@@ -23,6 +24,7 @@ type Event struct {
 	UserID        string          // 提交用户的 ID
 	ChallengeID   string          // 题目的 res_id
 	CompetitionID string          // 所属比赛的 res_id
+	SubmittedAt   time.Time       // 实际提交时间
 	Ctx           context.Context // 请求上下文
 }
 

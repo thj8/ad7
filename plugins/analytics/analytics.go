@@ -48,12 +48,13 @@ type overviewResponse struct {
 
 // categoryStats 是单个分类的统计数据。
 type categoryStats struct {
-	Category         string  `json:"category"`            // 分类名称
-	TotalChallenges  int     `json:"total_challenges"`    // 该分类题目数
-	TotalSolves      int     `json:"total_solves"`        // 该分类总解题数
-	UniqueUsersSolved int    `json:"unique_users_solved"` // 该分类独立解题用户数
-	AverageSolves    float64 `json:"average_solves_per_user"` // 人均解题数
-	SuccessRate      float64 `json:"success_rate"`        // 成功率（%）
+	Category          string  `json:"category"`                  // 分类名称
+	TotalChallenges   int     `json:"total_challenges"`          // 该分类题目数
+	TotalSolves       int     `json:"total_solves"`              // 该分类总解题数
+	UniqueUsersSolved int     `json:"unique_users_solved"`       // 该分类独立解题用户数
+	TotalAttempts     int     `json:"-"`                         // 该分类总提交数（仅用于计算成功率）
+	AverageSolves     float64 `json:"average_solves_per_user"`   // 人均解题数
+	SuccessRate       float64 `json:"success_rate"`              // 成功率（%）
 }
 
 // categoryResponse 是分类统计的响应结构。
@@ -136,19 +137,26 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// 查询比赛总用户数（查询一次，移到循环外）
+	// 查询比赛总用户数
 	totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 	if err != nil {
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 
-	// 查询比赛中各分类的题目数
+	// 单次聚合查询获取各分类的题目数、正确解题数、独立用户数和总提交数
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT c.category, COUNT(DISTINCT cc.challenge_id) as total_challenges
+		SELECT
+			c.category,
+			COUNT(DISTINCT cc.challenge_id) as total_challenges,
+			COALESCE(SUM(CASE WHEN s.is_correct = 1 THEN 1 ELSE 0 END), 0) as total_solves,
+			COUNT(DISTINCT CASE WHEN s.is_correct = 1 THEN s.user_id ELSE NULL END) as unique_users_solved,
+			COUNT(s.id) as total_attempts
 		FROM competition_challenges cc
-		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ? AND c.is_deleted = 0
+		JOIN challenges c ON c.res_id = cc.challenge_id AND c.is_deleted = 0
+		LEFT JOIN submissions s ON s.challenge_id = cc.challenge_id
+			AND s.competition_id = cc.competition_id AND s.is_deleted = 0
+		WHERE cc.competition_id = ?
 		GROUP BY c.category
 	`, compID)
 	if err != nil {
@@ -160,21 +168,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 	var categories []categoryStats
 	for rows.Next() {
 		var cat categoryStats
-		if err := rows.Scan(&cat.Category, &cat.TotalChallenges); err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
-		}
-
-		// 查询该分类的正确解题数和独立用户数
-		err = p.db.QueryRowContext(ctx, `
-			SELECT COUNT(*), COUNT(DISTINCT s.user_id)
-			FROM submissions s
-			JOIN challenges c ON c.res_id = s.challenge_id
-			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
-			WHERE s.competition_id = ? AND cc.competition_id = ?
-			AND s.is_correct = 1 AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
-			`, compID, compID, cat.Category).Scan(&cat.TotalSolves, &cat.UniqueUsersSolved)
-		if err != nil {
+		if err := rows.Scan(&cat.Category, &cat.TotalChallenges, &cat.TotalSolves, &cat.UniqueUsersSolved, &cat.TotalAttempts); err != nil {
 			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -182,24 +176,8 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		if totalUsers > 0 {
 			cat.AverageSolves = float64(cat.TotalSolves) / float64(totalUsers)
 		}
-
-		// 查询该分类的总提交数用于计算成功率
-		var totalAttempts int
-		err = p.db.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM submissions s
-			JOIN challenges c ON c.res_id = s.challenge_id
-			JOIN competition_challenges cc ON cc.challenge_id = c.res_id
-			WHERE s.competition_id = ? AND cc.competition_id = ?
-			AND s.is_deleted = 0 AND c.category = ? AND c.is_deleted = 0
-			`, compID, compID, cat.Category).Scan(&totalAttempts)
-		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
-		}
-
-		if totalAttempts > 0 {
-			cat.SuccessRate = (float64(cat.TotalSolves) / float64(totalAttempts)) * 100
+		if cat.TotalAttempts > 0 {
+			cat.SuccessRate = (float64(cat.TotalSolves) / float64(cat.TotalAttempts)) * 100
 		}
 
 		categories = append(categories, cat)

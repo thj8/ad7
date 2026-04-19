@@ -10,6 +10,7 @@ import (
 
 	"ad7/internal/middleware"
 	"ad7/internal/service"
+	"ad7/internal/store"
 )
 
 // SubmissionHandler 处理 Flag 提交相关的 HTTP 请求。
@@ -63,7 +64,11 @@ func (h *SubmissionHandler) ListByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	userID := r.URL.Query().Get("user_id")
 	challengeID := r.URL.Query().Get("challenge_id")
-	subs, err := h.svc.ListByComp(r.Context(), compID, userID, challengeID)
+	subs, err := h.svc.ListByComp(r.Context(), store.ListSubmissionsParams{
+		CompetitionID: compID,
+		UserID:        userID,
+		ChallengeID:   challengeID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
