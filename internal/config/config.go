@@ -45,15 +45,15 @@ type JWTConfig struct {
 	AdminRole string `yaml:"admin_role"`
 }
 
-// RateLimitRule defines a rate limit rule with requests per time window.
+// RateLimitRule 定义限流规则，包含时间窗口内的最大请求数。
 type RateLimitRule struct {
-	Requests int           `yaml:"requests"` // Maximum number of requests
-	Window   time.Duration `yaml:"window"`   // Time window for the limit
+	Requests int           `yaml:"requests"` // 最大请求数
+	Window   time.Duration `yaml:"window"`   // 限流时间窗口
 }
 
-// RateLimitConfig contains rate limit configurations for different endpoints.
+// RateLimitConfig 包含各端点的限流配置。
 type RateLimitConfig struct {
-	Submission RateLimitRule `yaml:"submission"` // Rate limit for flag submissions
+	Submission RateLimitRule `yaml:"submission"` // Flag 提交限流规则
 }
 
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
@@ -82,7 +82,7 @@ func Load(path string) (*Config, error) {
 	if cfg.JWT.AdminRole == "" {
 		cfg.JWT.AdminRole = "admin"
 	}
-	// Set default rate limit for submissions: 3 requests per 10 seconds
+	// 设置默认提交限流：10 秒内最多 3 次请求
 	if cfg.RateLimit.Submission.Requests == 0 {
 		cfg.RateLimit.Submission.Requests = 3
 	}

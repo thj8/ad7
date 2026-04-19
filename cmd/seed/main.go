@@ -381,15 +381,15 @@ func genSubmissions(cfg *genSubmissionsConfig) {
 			t := userBase.Add(step * time.Duration(j+1))
 			// 30% 概率在正确提交前有一次错误尝试
 			if cfg.RNG.Float64() < 0.3 {
-				insertSub(cfg.DB, userID, cid, cfg.CompID, false, t.Add(-2*time.Minute))
+				insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: cid, CompID: cfg.CompID, Correct: false, Time: t.Add(-2 * time.Minute)})
 			}
-			insertSub(cfg.DB, userID, cid, cfg.CompID, true, t)
+			insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: cid, CompID: cfg.CompID, Correct: true, Time: t})
 		}
 
 		// 在未解对的题目上生成 0-2 次错误尝试
 		for j := 0; j < cfg.RNG.Intn(3) && j < len(rest); j++ {
 			t := cfg.CompStart.Add(dur / time.Duration(u+2) * time.Duration(j+1))
-			insertSub(cfg.DB, userID, rest[j], cfg.CompID, false, t)
+			insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: rest[j], CompID: cfg.CompID, Correct: false, Time: t})
 		}
 	}
 }
@@ -407,16 +407,16 @@ type insertSubRequest struct {
 // insertSub 插入一条提交记录。
 // 参数 correct 为 true 时表示正确提交，flag 记录为 "flag{correct}"；
 // 否则记录为错误提交，flag 记录为 "flag{wrong_attempt}"。
-func insertSub(db *sql.DB, userID, chalID, compID string, correct bool, t time.Time) {
+func insertSub(req *insertSubRequest) {
 	flag := "flag{wrong_attempt}"
-	if correct {
+	if req.Correct {
 		flag = "flag{correct}"
 	}
 	rid := uuid.Next()
-	_, err := db.Exec(`INSERT INTO submissions
+	_, err := req.DB.Exec(`INSERT INTO submissions
 		(res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		rid, userID, chalID, compID, flag, correct, t)
+		rid, req.UserID, req.ChalID, req.CompID, flag, req.Correct, req.Time)
 	must(err, "insert submission")
 }
 

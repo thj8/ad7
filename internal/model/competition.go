@@ -17,8 +17,7 @@ type Competition struct {
 // CompetitionChallenge 表示比赛与题目的多对多关联关系。
 // 一道题目可以被分配到多个比赛中，一个比赛可以包含多道题目。
 type CompetitionChallenge struct {
-	ID            int    `json:"-"`               // 自增主键，仅内部使用
-	ResID         string `json:"id"`              // 关联记录的 UUID 标识
+	BaseModel
 	CompetitionID string `json:"competition_id"`  // 比赛的 res_id
 	ChallengeID   string `json:"challenge_id"`    // 题目的 res_id
 }

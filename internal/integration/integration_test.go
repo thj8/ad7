@@ -918,8 +918,8 @@ func TestTopThree(t *testing.T) {
 			ChallengeID string `json:"challenge_id"`
 			Title       string `json:"title"`
 			TopThree    []struct {
-				Rank   int    `json:"rank"`
-				UserID string `json:"user_id"`
+				Ranking int    `json:"ranking"`
+				UserID  string `json:"user_id"`
 			} `json:"top_three"`
 		} `json:"challenges"`
 	}
@@ -937,8 +937,8 @@ func TestTopThree(t *testing.T) {
 		ChallengeID string `json:"challenge_id"`
 		Title       string `json:"title"`
 		TopThree    []struct {
-			Rank   int    `json:"rank"`
-			UserID string `json:"user_id"`
+			Ranking int    `json:"ranking"`
+			UserID  string `json:"user_id"`
 		} `json:"top_three"`
 	}
 	for i := range respStruct.Challenges {

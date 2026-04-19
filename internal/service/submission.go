@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"ad7/internal/event"
 	"ad7/internal/model"
@@ -83,6 +84,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 			UserID:        req.UserID,
 			ChallengeID:   req.ChallengeID,
 			CompetitionID: req.CompetitionID,
+			SubmittedAt:   time.Now(),
 			Ctx:           ctx,
 		})
 		return ResultCorrect, nil
@@ -92,6 +94,6 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 
 // ListByComp 查询指定比赛内的提交记录。
 // 可通过用户 ID 和题目 ID 进一步过滤。
-func (s *SubmissionService) ListByComp(ctx context.Context, competitionID string, userID string, challengeID string) ([]model.Submission, error) {
-	return s.submissions.ListSubmissions(ctx, store.ListSubmissionsParams{CompetitionID: competitionID, UserID: userID, ChallengeID: challengeID})
+func (s *SubmissionService) ListByComp(ctx context.Context, params store.ListSubmissionsParams) ([]model.Submission, error) {
+	return s.submissions.ListSubmissions(ctx, params)
 }
