@@ -147,10 +147,14 @@ func (s *CompetitionService) ListChallenges(ctx context.Context, compID string) 
 
 // StartCompetition 手动开始比赛，设置 is_active = true。
 // 如果比赛已激活返回 ErrConflict，不存在返回 ErrNotFound。
+// 直接读取数据库，不经过 syncStatus，避免自动状态覆盖手动操作。
 func (s *CompetitionService) StartCompetition(ctx context.Context, resID string) (*model.Competition, error) {
-	c, err := s.Get(ctx, resID)
+	c, err := s.store.GetCompetitionByID(ctx, resID)
 	if err != nil {
 		return nil, err
+	}
+	if c == nil {
+		return nil, ErrNotFound
 	}
 	if c.IsActive {
 		return nil, ErrConflict
@@ -165,10 +169,14 @@ func (s *CompetitionService) StartCompetition(ctx context.Context, resID string)
 
 // EndCompetition 手动结束比赛，设置 is_active = false。
 // 如果比赛已结束返回 ErrConflict，不存在返回 ErrNotFound。
+// 直接读取数据库，不经过 syncStatus，避免自动状态覆盖手动操作。
 func (s *CompetitionService) EndCompetition(ctx context.Context, resID string) (*model.Competition, error) {
-	c, err := s.Get(ctx, resID)
+	c, err := s.store.GetCompetitionByID(ctx, resID)
 	if err != nil {
 		return nil, err
+	}
+	if c == nil {
+		return nil, ErrNotFound
 	}
 	if !c.IsActive {
 		return nil, ErrConflict

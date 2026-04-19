@@ -1154,3 +1154,110 @@ func TestSubmitFlagRateLimit(t *testing.T) {
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 }
+
+func TestCompetitionStartEnd(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+
+	// 创建比赛（默认 is_active=true）
+	startTime := time.Now().Add(-2 * time.Hour).Format(time.RFC3339)
+	endTime := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Test Comp","description":"desc","start_time":"`+startTime+`","end_time":"`+endTime+`"}`,
+		adminTok)
+	assertStatus(t, resp, http.StatusCreated)
+	compID := getID(t, decodeJSON(t, resp))
+
+	// 1. 手动结束比赛
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+compID+"/end", "", adminTok)
+	assertStatus(t, resp, http.StatusOK)
+	body := decodeJSON(t, resp)
+	if body["is_active"] != false {
+		t.Fatalf("expected is_active=false after end, got %v", body["is_active"])
+	}
+
+	// 2. 重复结束 → 409
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+compID+"/end", "", adminTok)
+	assertStatus(t, resp, http.StatusConflict)
+
+	// 3. 手动开始比赛
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+compID+"/start", "", adminTok)
+	assertStatus(t, resp, http.StatusOK)
+	body = decodeJSON(t, resp)
+	if body["is_active"] != true {
+		t.Fatalf("expected is_active=true after start, got %v", body["is_active"])
+	}
+
+	// 4. 重复开始 → 409
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+compID+"/start", "", adminTok)
+	assertStatus(t, resp, http.StatusConflict)
+
+	// 5. 不存在的比赛 → 404
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/00000000000000000000000000000000/start", "", adminTok)
+	assertStatus(t, resp, http.StatusNotFound)
+
+	// 6. 非 admin → 403
+	userTok := makeToken("user1", "user")
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+compID+"/start", "", userTok)
+	assertStatus(t, resp, http.StatusForbidden)
+}
+
+func TestCompetitionAutoStatus(t *testing.T) {
+	cleanup(t)
+	adminTok := makeToken("admin1", "admin")
+	userTok := makeToken("user1", "user")
+
+	// --- 自动激活测试 ---
+	// 创建一个 start_time 在过去、end_time 在未来的比赛
+	start1 := time.Now().Add(-2 * time.Hour).Format(time.RFC3339)
+	end1 := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Auto Activate","description":"","start_time":"`+start1+`","end_time":"`+end1+`"}`,
+		adminTok)
+	assertStatus(t, resp, http.StatusCreated)
+	comp1ID := getID(t, decodeJSON(t, resp))
+
+	// 手动结束比赛使其 is_active=false
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions/"+comp1ID+"/end", "", adminTok)
+	assertStatus(t, resp, http.StatusOK)
+
+	// 通过 Get 触发 syncStatus，应自动激活
+	resp = doRequest(t, "GET", "/api/v1/competitions/"+comp1ID, "", userTok)
+	assertStatus(t, resp, http.StatusOK)
+	body := decodeJSON(t, resp)
+	if body["is_active"] != true {
+		t.Fatalf("expected auto-activation (is_active=true), got %v", body["is_active"])
+	}
+
+	// --- 自动结束测试 ---
+	// 创建一个 end_time 在过去的比赛
+	start2 := time.Now().Add(-3 * time.Hour).Format(time.RFC3339)
+	end2 := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+	resp = doRequest(t, "POST", "/api/v1/admin/competitions",
+		`{"title":"Auto End","description":"","start_time":"`+start2+`","end_time":"`+end2+`"}`,
+		adminTok)
+	assertStatus(t, resp, http.StatusCreated)
+	comp2ID := getID(t, decodeJSON(t, resp))
+
+	// 新建比赛默认 is_active=true，但 end_time 已过
+	// 通过 Get 触发 syncStatus，应自动结束
+	resp = doRequest(t, "GET", "/api/v1/competitions/"+comp2ID, "", userTok)
+	assertStatus(t, resp, http.StatusOK)
+	body = decodeJSON(t, resp)
+	if body["is_active"] != false {
+		t.Fatalf("expected auto-ending (is_active=false), got %v", body["is_active"])
+	}
+
+	// --- ListActive 过滤测试 ---
+	// comp2 已自动结束，不应出现在 ListActive 中
+	resp = doRequest(t, "GET", "/api/v1/competitions", "", userTok)
+	assertStatus(t, resp, http.StatusOK)
+	listBody := decodeJSON(t, resp)
+	comps := listBody["competitions"].([]any)
+	for _, c := range comps {
+		m := c.(map[string]any)
+		if m["id"] == comp2ID {
+			t.Fatal("auto-ended competition should not appear in ListActive")
+		}
+	}
+}
