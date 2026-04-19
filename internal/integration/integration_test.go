@@ -577,8 +577,8 @@ func TestSubmitInCompetition(t *testing.T) {
 func TestCompetitionLeaderboard(t *testing.T) {
 	cleanup(t)
 	adminTok := makeToken("admin1", "admin")
-	u1 := makeToken("user1", "user")
-	u2 := makeToken("user2", "user")
+	u1 := makeToken("lb_user1", "user")
+	u2 := makeToken("lb_user2", "user")
 
 	// Create competition + 2 challenges
 	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
@@ -619,8 +619,8 @@ func TestCompetitionLeaderboard(t *testing.T) {
 		t.Fatalf("expected 2 entries, got %d", len(board))
 	}
 	first := board[0].(map[string]any)
-	if first["user_id"] != "user1" {
-		t.Fatalf("expected user1 at rank 1, got %v", first["user_id"])
+	if first["user_id"] != "lb_user1" {
+		t.Fatalf("expected lb_user1 at rank 1, got %v", first["user_id"])
 	}
 
 	// 验证逐题详情
@@ -667,7 +667,7 @@ func TestCompetitionNotifications(t *testing.T) {
 func TestAnalyticsOverview(t *testing.T) {
 	cleanup(t)
 	adminTok := makeToken("admin1", "admin")
-	userTok := makeToken("user1", "user")
+	userTok := makeToken("ao_user1", "user")
 
 	// Create competition
 	resp := doRequest(t, "POST", "/api/v1/admin/competitions",
@@ -873,37 +873,37 @@ func TestTopThree(t *testing.T) {
 
 	// Submit for challenge 1 in order: user3, user1, user2, user4
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal1ID),
-		`{"flag":"flag{1}"}`, makeToken("user3", "user"))
+		`{"flag":"flag{1}"}`, makeToken("tt_user3", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	time.Sleep(10 * time.Millisecond)
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal1ID),
-		`{"flag":"flag{1}"}`, makeToken("user1", "user"))
+		`{"flag":"flag{1}"}`, makeToken("tt_user1", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	time.Sleep(10 * time.Millisecond)
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal1ID),
-		`{"flag":"flag{1}"}`, makeToken("user2", "user"))
+		`{"flag":"flag{1}"}`, makeToken("tt_user2", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	time.Sleep(10 * time.Millisecond)
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal1ID),
-		`{"flag":"flag{1}"}`, makeToken("user4", "user"))
+		`{"flag":"flag{1}"}`, makeToken("tt_user4", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	// Submit for challenge 2: user2, user3
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal2ID),
-		`{"flag":"flag{2}"}`, makeToken("user2", "user"))
+		`{"flag":"flag{2}"}`, makeToken("tt_user2", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
 	time.Sleep(10 * time.Millisecond)
 	resp = doRequest(t, "POST", fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chal2ID),
-		`{"flag":"flag{2}"}`, makeToken("user3", "user"))
+		`{"flag":"flag{2}"}`, makeToken("tt_user3", "user"))
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
 
@@ -911,7 +911,7 @@ func TestTopThree(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test API endpoint
-	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", makeToken("user1", "user"))
+	resp = doRequest(t, "GET", fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", makeToken("tt_user1", "user"))
 	assertStatus(t, resp, 200)
 
 	var respStruct struct {
