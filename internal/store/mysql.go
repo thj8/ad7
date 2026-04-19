@@ -299,3 +299,12 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.
 	return cs, rows.Err()
 }
 
+// SetActive 根据 res_id 设置比赛的 is_active 状态。
+// WHERE 条件包含 is_deleted = 0，不会修改已删除的比赛。
+func (s *Store) SetActive(ctx context.Context, resID string, active bool) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE competitions SET is_active = ? WHERE res_id = ? AND is_deleted = 0`,
+		active, resID)
+	return err
+}
+
