@@ -70,8 +70,16 @@ func (a *Auth) Authenticate(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
 			return
 		}
-		userID, _ := claims["sub"].(string)
-		role, _ := claims["role"].(string)
+		userID, ok := claims["sub"].(string)
+	if !ok || userID == "" {
+		http.Error(w, `{"error":"invalid token: missing sub"}`, http.StatusUnauthorized)
+		return
+	}
+		role, ok := claims["role"].(string)
+	if !ok || role == "" {
+		http.Error(w, `{"error":"invalid token: missing role"}`, http.StatusUnauthorized)
+		return
+	}
 		// 将用户信息注入请求上下文，供后续 Handler 使用
 		ctx := context.WithValue(r.Context(), CtxUserID, userID)
 		ctx = context.WithValue(ctx, CtxRole, role)

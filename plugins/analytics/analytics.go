@@ -5,6 +5,7 @@ package analytics
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -70,12 +71,14 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("analytics overview", "competition_id", compID)
 	ctx := r.Context()
 	var resp overviewResponse
 
 	// 查询比赛中的题目总数
 	totalChallenges, err := pluginutil.GetCompChallengeCount(ctx, p.db, compID)
 	if err != nil {
+		slog.Error("analytics overview query failed", "error", err, "competition_id", compID)
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -84,6 +87,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	// 查询有提交记录的用户数
 	totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 	if err != nil {
+		slog.Error("analytics overview query failed", "error", err, "competition_id", compID)
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -92,6 +96,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	// 查询总提交数和正确提交数
 	totalSubs, correctSubs, err := pluginutil.GetCompSubmitStats(ctx, p.db, compID)
 	if err != nil {
+		slog.Error("analytics overview query failed", "error", err, "competition_id", compID)
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -115,6 +120,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0 AND c.is_deleted = 0
 	`, compID).Scan(&avgSolveTimeSec)
 	if err != nil {
+		slog.Error("analytics overview query failed", "error", err, "competition_id", compID)
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -135,11 +141,13 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("analytics byCategory", "competition_id", compID)
 	ctx := r.Context()
 
 	// 查询比赛总用户数
 	totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 	if err != nil {
+		slog.Error("analytics byCategory query failed", "error", err, "competition_id", compID)
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 		return
 	}
@@ -156,7 +164,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		JOIN challenges c ON c.res_id = cc.challenge_id AND c.is_deleted = 0
 		LEFT JOIN submissions s ON s.challenge_id = cc.challenge_id
 			AND s.competition_id = cc.competition_id AND s.is_deleted = 0
-		WHERE cc.competition_id = ?
+		WHERE cc.competition_id = ? AND cc.is_deleted = 0
 		GROUP BY c.category
 	`, compID)
 	if err != nil {

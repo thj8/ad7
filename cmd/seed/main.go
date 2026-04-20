@@ -162,12 +162,13 @@ var (
 )
 
 // dsn 返回数据库连接字符串。
-// 优先使用 TEST_DSN 环境变量，如果未设置则使用默认值。
+// 优先使用 TEST_DSN 环境变量，如果未设置则失败。
 func dsn() string {
-	if d := os.Getenv("TEST_DSN"); d != "" {
-		return d
+	testDSN := os.Getenv("TEST_DSN")
+	if testDSN == "" {
+		log.Fatal("TEST_DSN environment variable is required")
 	}
-	return "root:asfdsfedarjeiowvgfsd@tcp(192.168.5.44:3306)/ctf?parseTime=true"
+	return testDSN
 }
 
 // main 是种子数据生成工具的入口。
@@ -244,7 +245,9 @@ func cleanAll(db *sql.DB) {
 		"competition_challenges", "notifications",
 		"submissions", "competitions", "challenges",
 	} {
-		db.Exec("DELETE FROM " + t)
+		if _, err := db.Exec("DELETE FROM " + t); err != nil {
+			log.Fatalf("clean table %s: %v", t, err)
+		}
 	}
 }
 

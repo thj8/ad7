@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,7 +44,8 @@ func DSN() string {
 	if v := os.Getenv("TEST_DSN"); v != "" {
 		return v
 	}
-	return "root:asfdsfedarjeiowvgfsd@tcp(192.168.5.44:3306)/ctf?parseTime=true"
+	log.Fatal("TEST_DSN environment variable is required")
+	return ""
 }
 
 // TestEnv holds the shared test infrastructure: an HTTP test server and a database
@@ -154,21 +156,27 @@ func Cleanup(t *testing.T, db *sql.DB) {
 
 // MakeToken creates a JWT token valid for 1 hour with the given userID and role.
 func MakeToken(userID, role string) string {
-	tok, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  userID,
 		"role": role,
 		"exp":  time.Now().Add(time.Hour).Unix(),
 	}).SignedString([]byte(TestSecret))
+	if err != nil {
+		panic(fmt.Sprintf("sign token failed: %v", err))
+	}
 	return tok
 }
 
 // MakeExpiredToken creates a JWT token that has already expired.
 func MakeExpiredToken(userID, role string) string {
-	tok, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  userID,
 		"role": role,
 		"exp":  time.Now().Add(-time.Hour).Unix(),
 	}).SignedString([]byte(TestSecret))
+	if err != nil {
+		panic(fmt.Sprintf("sign expired token failed: %v", err))
+	}
 	return tok
 }
 

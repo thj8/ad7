@@ -100,8 +100,8 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 验证字段长度限制
-	if validateLen("title", req.Title, 255) != "" ||
-		validateLen("description", req.Description, maxFieldLen) != "" {
+	if validateLen("title", req.Title, maxTitleLen) != nil ||
+		validateLen("description", req.Description, maxFieldLen) != nil {
 		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
@@ -156,8 +156,8 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 验证字段长度限制
-	if validateLen("title", req.Title, 255) != "" ||
-		validateLen("description", req.Description, maxFieldLen) != "" {
+	if validateLen("title", req.Title, maxTitleLen) != nil ||
+		validateLen("description", req.Description, maxFieldLen) != nil {
 		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}

@@ -85,9 +85,9 @@ func (h *ChallengeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 验证字段长度限制
-	if e := validateLen("title", req.Title, 255); e != "" ||
-		validateLen("flag", req.Flag, 255) != "" ||
-		validateLen("description", req.Description, maxFieldLen) != "" {
+	if err := validateLen("title", req.Title, maxTitleLen); err != nil ||
+		validateLen("flag", req.Flag, maxFlagLen) != nil ||
+		validateLen("description", req.Description, maxFieldLen) != nil {
 		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}
@@ -134,9 +134,9 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 验证字段长度限制
-	if e := validateLen("title", req.Title, 255); e != "" ||
-		validateLen("flag", req.Flag, 255) != "" ||
-		validateLen("description", req.Description, maxFieldLen) != "" {
+	if err := validateLen("title", req.Title, maxTitleLen); err != nil ||
+		validateLen("flag", req.Flag, maxFlagLen) != nil ||
+		validateLen("description", req.Description, maxFieldLen) != nil {
 		writeError(w, http.StatusBadRequest, "field too long")
 		return
 	}

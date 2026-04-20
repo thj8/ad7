@@ -59,7 +59,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := p.db.QueryContext(r.Context(), `
-		SELECT res_id, competition_id, title, message, created_at
+		SELECT res_id, competition_id, title, message, created_at, updated_at
 		FROM notifications
 		WHERE competition_id = ? AND is_deleted = 0
 		ORDER BY created_at DESC`, compID)
@@ -72,7 +72,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	var ns []model.Notification
 	for rows.Next() {
 		var n model.Notification
-		if err := rows.Scan(&n.ResID, &n.CompetitionID, &n.Title, &n.Message, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ResID, &n.CompetitionID, &n.Title, &n.Message, &n.CreatedAt, &n.UpdatedAt); err != nil {
 			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -94,6 +94,10 @@ func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" || req.Message == "" {
 		pluginutil.WriteError(w, http.StatusBadRequest, "title and message are required")
+		return
+	}
+	if len(req.Title) > 255 || len(req.Message) > 4096 {
+		pluginutil.WriteError(w, http.StatusBadRequest, "title too long (max 255) or message too long (max 4096)")
 		return
 	}
 	_, err := p.db.ExecContext(r.Context(),

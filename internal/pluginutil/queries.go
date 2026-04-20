@@ -130,7 +130,7 @@ func GetCompDistinctUsers(ctx context.Context, db DBTX, compID string) (int, err
 func GetCompChallengeCount(ctx context.Context, db DBTX, compID string) (int, error) {
 	var count int
 	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ?
+		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ? AND is_deleted = 0
 	`, compID).Scan(&count)
 	return count, err
 }

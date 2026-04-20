@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"ad7/internal/model"
 	"ad7/internal/store"
@@ -36,7 +37,7 @@ func (s *ChallengeService) List(ctx context.Context) ([]model.Challenge, error) 
 func (s *ChallengeService) Get(ctx context.Context, resID string) (*model.Challenge, error) {
 	c, err := s.store.GetEnabledByID(ctx, resID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get challenge %s: %w", resID, err)
 	}
 	if c == nil {
 		return nil, ErrNotFound
@@ -56,17 +57,29 @@ func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (stri
 	if c.Title == "" || c.Flag == "" {
 		return "", errors.New("title and flag are required")
 	}
-	// 设置默认分值
-	if c.Score <= 0 {
-		c.Score = 100
+	// Set defaults on local values without mutating caller's struct
+	score := c.Score
+	if score <= 0 {
+		score = 100
 	}
-	// 设置默认分类
-	if c.Category == "" {
-		c.Category = "misc"
+	category := c.Category
+	if category == "" {
+		category = "misc"
 	}
-	// 新建题目默认启用
-	c.IsEnabled = true
-	return s.store.Create(ctx, c)
+	// Build a new Challenge with defaults applied, preserving caller's struct
+	challenge := &model.Challenge{
+		Title:       c.Title,
+		Description: c.Description,
+		Flag:        c.Flag,
+		Score:       score,
+		Category:    category,
+		IsEnabled:   true,
+	}
+	resID, err := s.store.Create(ctx, challenge)
+	if err != nil {
+		return "", fmt.Errorf("create challenge: %w", err)
+	}
+	return resID, nil
 }
 
 // Update 使用合并策略更新题目。只更新 patch 中非空/非零值的字段。
@@ -76,7 +89,7 @@ func (s *ChallengeService) Update(ctx context.Context, resID string, patch *mode
 	// 先获取现有题目
 	existing, err := s.store.GetByID(ctx, resID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get challenge %s for update: %w", resID, err)
 	}
 	if existing == nil {
 		return ErrNotFound
@@ -98,11 +111,19 @@ func (s *ChallengeService) Update(ctx context.Context, resID string, patch *mode
 		existing.Flag = patch.Flag
 	}
 	// PUT 请求总是显式设置 is_enabled，不使用合并策略
+	// NOTE: Mutation of `existing` is acceptable here — this is an Update pattern
+	// that needs to merge patch fields into the persisted entity before writing back.
 	existing.IsEnabled = patch.IsEnabled
-	return s.store.Update(ctx, existing)
+	if err := s.store.Update(ctx, existing); err != nil {
+		return fmt.Errorf("update challenge %s: %w", resID, err)
+	}
+	return nil
 }
 
 // Delete 软删除题目（将 is_deleted 设为 1）。
 func (s *ChallengeService) Delete(ctx context.Context, resID string) error {
-	return s.store.Delete(ctx, resID)
+	if err := s.store.Delete(ctx, resID); err != nil {
+		return fmt.Errorf("delete challenge %s: %w", resID, err)
+	}
+	return nil
 }

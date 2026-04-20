@@ -12,7 +12,9 @@ import (
 // 返回格式示例：a1b2c3d4e5f67890a1b2c3d4e5f67890
 func Next() string {
 	uuid := make([]byte, 16)
-	_, _ = rand.Read(uuid)
+	if _, err := rand.Read(uuid); err != nil {
+		panic(fmt.Sprintf("crypto/rand.Read failed: %v", err))
+	}
 	// 设置版本号为 4（随机生成），即第 7 字节高 4 位为 0100
 	uuid[6] = (uuid[6] & 0x0f) | 0x40
 	// 设置变体为 RFC4122，即第 9 字节高 2 位为 10

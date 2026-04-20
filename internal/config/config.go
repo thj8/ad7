@@ -100,5 +100,12 @@ func Load(path string) (*Config, error) {
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}
+	// 验证必填字段
+	if cfg.JWT.Secret == "" {
+		return nil, fmt.Errorf("jwt.secret is required")
+	}
+	if cfg.DB.Host == "" {
+		return nil, fmt.Errorf("db.host is required")
+	}
 	return &cfg, nil
 }

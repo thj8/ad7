@@ -23,12 +23,21 @@ type RouteDeps struct {
 // RegisterAPIV1 注册所有 /api/v1 路由。
 // 创建 /api/v1 子路由组，统一加 auth.Authenticate 中间件，
 // 然后调用各模块的注册函数。
+// Admin 路由统一在 /admin 子路由组中注册，避免重复 Mount。
 func RegisterAPIV1(r chi.Router, deps RouteDeps) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(deps.Auth.Authenticate)
 
+		// 公开路由
 		RegisterChallengeRoutes(r, deps)
 		RegisterCompetitionRoutes(r, deps)
 		RegisterSubmissionRoutes(r, deps)
+
+		// Admin 路由 — 统一一个 /admin 组
+		r.Route("/admin", func(ar chi.Router) {
+			ar.Use(deps.Auth.RequireAdmin)
+			registerAdminChallengeRoutes(ar, deps)
+			registerAdminCompetitionRoutes(ar, deps)
+		})
 	})
 }

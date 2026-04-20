@@ -4,6 +4,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,13 +31,13 @@ func Init(cfg config.LogConfig) error {
 	dir := filepath.Dir(cfg.Path)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
+			return fmt.Errorf("open log file %s: %w", cfg.Path, err)
 		}
 	}
 
 	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("open log file %s: %w", cfg.Path, err)
 	}
 
 	jsonHandler := slog.NewJSONHandler(f, opts)
@@ -66,7 +67,7 @@ func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (m *multiHandler) Handle(ctx context.Context, r slog.Record) error {
 	for _, h := range m.handlers {
 		if err := h.Handle(ctx, r); err != nil {
-			return err
+			return fmt.Errorf("handler error: %w", err)
 		}
 	}
 	return nil

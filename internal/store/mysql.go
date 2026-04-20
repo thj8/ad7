@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"ad7/internal/model"
@@ -22,7 +23,7 @@ type Store struct {
 func New(dsn string) (*Store, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open db: %w", err)
 	}
 	// 验证数据库连接是否可用
 	if err := db.Ping(); err != nil {
@@ -44,7 +45,7 @@ func (s *Store) ListEnabled(ctx context.Context) ([]model.Challenge, error) {
 		`SELECT res_id, title, category, description, score, is_enabled, created_at, updated_at
 		 FROM challenges WHERE is_enabled = 1 AND is_deleted = 0`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list enabled challenges: %w", err)
 	}
 	defer rows.Close()
 	var cs []model.Challenge
@@ -52,11 +53,14 @@ func (s *Store) ListEnabled(ctx context.Context) ([]model.Challenge, error) {
 		var c model.Challenge
 		if err := rows.Scan(&c.ResID, &c.Title, &c.Category, &c.Description,
 			&c.Score, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan enabled challenge: %w", err)
 		}
 		cs = append(cs, c)
 	}
-	return cs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enabled challenges: %w", err)
+	}
+	return cs, nil
 }
 
 // GetEnabledByID 根据 res_id 查询单个已启用且未删除的题目（含 Flag）。
@@ -68,10 +72,10 @@ func (s *Store) GetEnabledByID(ctx context.Context, resID string) (*model.Challe
 		 FROM challenges WHERE res_id = ? AND is_enabled = 1 AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Category, &c.Description,
 			&c.Score, &c.Flag, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return &c, err
+	return &c, fmt.Errorf("get enabled challenge by id %s: %w", resID, err)
 }
 
 // GetByID 根据 res_id 查询单个未删除的题目（含 Flag），不检查启用状态。
@@ -83,10 +87,10 @@ func (s *Store) GetByID(ctx context.Context, resID string) (*model.Challenge, er
 		 FROM challenges WHERE res_id = ? AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Category, &c.Description,
 			&c.Score, &c.Flag, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return &c, err
+	return &c, fmt.Errorf("get challenge by id %s: %w", resID, err)
 }
 
 // Create 创建新题目。自动生成 32 字符 UUID 作为 res_id。
@@ -98,7 +102,7 @@ func (s *Store) Create(ctx context.Context, c *model.Challenge) (string, error) 
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		c.ResID, c.Title, c.Category, c.Description, c.Score, c.Flag, c.IsEnabled)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create challenge: %w", err)
 	}
 	return c.ResID, nil
 }
@@ -106,16 +110,16 @@ func (s *Store) Create(ctx context.Context, c *model.Challenge) (string, error) 
 // Update 根据 res_id 更新题目的全部字段（title, category, description, score, flag, is_enabled）。
 func (s *Store) Update(ctx context.Context, c *model.Challenge) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE challenges SET title=?, category=?, description=?, score=?, flag=?, is_enabled=? WHERE res_id=?`,
+		`UPDATE challenges SET title=?, category=?, description=?, score=?, flag=?, is_enabled=? WHERE res_id=? AND is_deleted = 0`,
 		c.Title, c.Category, c.Description, c.Score, c.Flag, c.IsEnabled, c.ResID)
-	return err
+	return fmt.Errorf("update challenge %s: %w", c.ResID, err)
 }
 
 // Delete 软删除题目，将 is_deleted 字段设为 1。
 // 已删除的题目不会出现在查询结果中。
 func (s *Store) Delete(ctx context.Context, resID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE challenges SET is_deleted=1 WHERE res_id = ?`, resID)
-	return err
+	_, err := s.db.ExecContext(ctx, `UPDATE challenges SET is_deleted=1 WHERE res_id = ? AND is_deleted = 0`, resID)
+	return fmt.Errorf("delete challenge %s: %w", resID, err)
 }
 
 // HasCorrectSubmission 检查指定用户在指定比赛中是否已正确提交过某道题目。
@@ -134,7 +138,7 @@ func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) err
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
 		sub.ResID, sub.UserID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
-	return err
+	return fmt.Errorf("create submission for user %s, challenge %s: %w", sub.UserID, sub.ChallengeID, err)
 }
 
 // ListSubmissions 根据 params 查询提交记录。
@@ -224,10 +228,10 @@ func (s *Store) GetCompetitionByID(ctx context.Context, resID string) (*model.Co
 		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
 		 FROM competitions WHERE res_id = ? AND is_deleted = 0`, resID).
 		Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return &c, err
+	return &c, fmt.Errorf("get competition by id %s: %w", resID, err)
 }
 
 // CreateCompetition 创建新比赛，自动生成 res_id。
@@ -246,18 +250,20 @@ func (s *Store) CreateCompetition(ctx context.Context, c *model.Competition) (st
 // UpdateCompetition 根据 res_id 更新比赛信息。
 func (s *Store) UpdateCompetition(ctx context.Context, c *model.Competition) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE competitions SET title=?, description=?, start_time=?, end_time=?, is_active=? WHERE res_id=?`,
+		`UPDATE competitions SET title=?, description=?, start_time=?, end_time=?, is_active=? WHERE res_id=? AND is_deleted = 0`,
 		c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive, c.ResID)
-	return err
+	return fmt.Errorf("update competition %s: %w", c.ResID, err)
 }
 
 // DeleteCompetition 软删除比赛。先删除该比赛的题目关联记录，再将比赛标记为已删除。
 func (s *Store) DeleteCompetition(ctx context.Context, resID string) error {
 	// 先清理比赛与题目的关联记录
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM competition_challenges WHERE competition_id = ?`, resID)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM competition_challenges WHERE competition_id = ?`, resID); err != nil {
+		return fmt.Errorf("delete competition challenges for %s: %w", resID, err)
+	}
 	// 软删除比赛本身
 	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ?`, resID)
-	return err
+	return fmt.Errorf("delete competition %s: %w", resID, err)
 }
 
 // AddChallenge 将一道题目分配到比赛中，自动生成关联记录的 res_id。
@@ -265,7 +271,7 @@ func (s *Store) AddChallenge(ctx context.Context, compID, chalID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO competition_challenges (res_id, competition_id, challenge_id) VALUES (?, ?, ?)`,
 		uuid.Next(), compID, chalID)
-	return err
+	return fmt.Errorf("error: %w", err)
 }
 
 // RemoveChallenge 从比赛中移除一道题目的关联记录（硬删除）。
@@ -273,7 +279,7 @@ func (s *Store) RemoveChallenge(ctx context.Context, compID, chalID string) erro
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM competition_challenges WHERE competition_id = ? AND challenge_id = ?`,
 		compID, chalID)
-	return err
+	return fmt.Errorf("error: %w", err)
 }
 
 // ListCompChallenges 查询指定比赛中所有已启用且未删除的题目。
@@ -305,6 +311,6 @@ func (s *Store) SetActive(ctx context.Context, resID string, active bool) error 
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE competitions SET is_active = ? WHERE res_id = ? AND is_deleted = 0`,
 		active, resID)
-	return err
+	return fmt.Errorf("error: %w", err)
 }
 

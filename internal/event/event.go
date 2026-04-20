@@ -5,6 +5,7 @@ package event
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 )
@@ -51,6 +52,13 @@ func Publish(e Event) {
 	mu.RLock()
 	defer mu.RUnlock()
 	for _, fn := range subscribers[e.Type] {
-		go fn(e) // 异步执行，不阻塞主流程
+		go func(fn func(Event), e Event) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[event] panic in subscriber for %s: %v", e.Type, r)
+				}
+			}()
+			fn(e)
+		}(fn, e)
 	}
 }

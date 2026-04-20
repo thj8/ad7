@@ -29,7 +29,15 @@ func NewSubmissionHandler(svc *service.SubmissionService) *SubmissionHandler {
 // 返回提交结果：correct / incorrect / already_solved。
 func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "comp_id")
+	if len(compID) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid competition id")
+		return
+	}
 	chalID := chi.URLParam(r, "id")
+	if len(chalID) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid challenge id")
+		return
+	}
 	var body struct {
 		Flag string `json:"flag"`
 	}
@@ -62,6 +70,10 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 // 支持通过 query 参数 user_id 和 challenge_id 过滤提交记录。
 func (h *SubmissionHandler) ListByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
+	if len(compID) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid competition id")
+		return
+	}
 	userID := r.URL.Query().Get("user_id")
 	challengeID := r.URL.Query().Get("challenge_id")
 	subs, err := h.svc.ListByComp(r.Context(), store.ListSubmissionsParams{
