@@ -20,6 +20,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 
+	"ad7/internal/auth"
 	"ad7/internal/handler"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
@@ -52,9 +53,10 @@ func DSN() string {
 // connection. It is created by NewTestEnv and must be closed with Close when tests
 // are done.
 type TestEnv struct {
-	Server *httptest.Server
-	DB     *sql.DB
-	store  *store.Store
+	Server     *httptest.Server
+	AuthServer *httptest.Server
+	DB         *sql.DB
+	store      *store.Store
 }
 
 // NewTestEnv creates a fully wired test environment suitable for TestMain.
@@ -83,7 +85,20 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	cfg.RateLimit.Submission.Requests = 3
 	cfg.RateLimit.Submission.Window = 10 * time.Second
 
-	auth := middleware.NewAuth(TestSecret, AdminRole)
+	// 启动 auth 测试服务器
+	authStore := auth.NewAuthStore(st.DB())
+	authSvc := auth.NewAuthService(authStore, TestSecret, AdminRole)
+	verifyH := auth.NewVerifyHandler(authSvc)
+	authDeps := auth.RouteDeps{AuthH: auth.NewAuthHandler(authSvc), TeamH: auth.NewTeamHandler(auth.NewTeamService(authStore, authStore))}
+	authR := chi.NewRouter()
+	authR.Use(chimw.Recoverer)
+	authR.Route("/api/v1", func(r chi.Router) {
+		auth.RegisterPublicRoutes(r, authDeps)
+		r.Post("/verify", verifyH.Verify)
+	})
+	authServer := httptest.NewServer(authR)
+
+	auth := middleware.NewAuth(authServer.URL, AdminRole)
 	challengeSvc := service.NewChallengeService(st)
 	submissionSvc := service.NewSubmissionService(st, st)
 	compSvc := service.NewCompetitionService(st)
@@ -136,15 +151,17 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	}
 
 	return &TestEnv{
-		Server: httptest.NewServer(r),
-		DB:     st.DB(),
-		store:  st,
+		Server:     httptest.NewServer(r),
+		AuthServer: authServer,
+		DB:         st.DB(),
+		store:      st,
 	}
 }
 
 // Close shuts down the HTTP test server and closes the store (database connection).
 func (e *TestEnv) Close() {
 	e.Server.Close()
+	e.AuthServer.Close()
 	e.store.Close()
 }
 
@@ -159,6 +176,8 @@ func Cleanup(t *testing.T, db *sql.DB) {
 	db.Exec("DELETE FROM submissions")
 	db.Exec("DELETE FROM competitions")
 	db.Exec("DELETE FROM challenges")
+	db.Exec("DELETE FROM users")
+	db.Exec("DELETE FROM teams")
 }
 
 // MakeToken creates a JWT token valid for 1 hour with the given userID and role.
