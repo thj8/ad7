@@ -1,11 +1,17 @@
 openapi: 3.0.3
 info:
   title: CTF 解题赛系统 API
-  version: 2.0.0
-  description: Jeopardy CTF 平台后端 API — 题目管理 + flag 提交 + 比赛管理 + 排行榜 + 通知
+  version: 3.0.0
+  description: |
+    Jeopardy CTF 平台后端 API — 双服务架构。
+    CTF 服务器（端口 8080）：题目管理 + flag 提交 + 比赛管理 + 排行榜 + 通知 + 提示 + 分析 + 一二三血。
+    Auth 服务器（端口 8081）：用户注册/登录 + JWT 验证 + 队伍管理。
 
 servers:
   - url: http://localhost:8080
+    description: CTF 服务器
+  - url: http://localhost:8081
+    description: Auth 服务器
 
 components:
   securitySchemes:
@@ -15,74 +21,542 @@ components:
       bearerFormat: JWT
       description: JWT Token，claims 包含 sub(user_id) 和 role
 
+  parameters:
+    ResID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 32 }
+      description: 32 字符十六进制 res_id（无连字符）
+
   schemas:
-    Challenge:
-      type: object
-      properties:
-        id:          { type: integer, format: int64, description: snowflake res_id }
-        title:       { type: string }
-        category:    { type: string }
-        description: { type: string }
-        score:       { type: integer }
-        is_enabled:  { type: boolean }
-        created_at:  { type: string, format: date-time }
-        updated_at:  { type: string, format: date-time }
-
-    Submission:
-      type: object
-      properties:
-        id:             { type: integer, format: int64, description: snowflake res_id }
-        user_id:        { type: string }
-        challenge_id:   { type: integer, format: int64 }
-        competition_id: { type: integer, format: int64, nullable: true }
-        submitted_flag: { type: string }
-        is_correct:     { type: boolean }
-        created_at:     { type: string, format: date-time }
-
-    Competition:
-      type: object
-      properties:
-        id:          { type: integer, format: int64, description: snowflake res_id }
-        title:       { type: string }
-        description: { type: string }
-        start_time:  { type: string, format: date-time }
-        end_time:    { type: string, format: date-time }
-        is_active:   { type: boolean }
-        created_at:  { type: string, format: date-time }
-        updated_at:  { type: string, format: date-time }
-
-    Notification:
-      type: object
-      properties:
-        id:             { type: integer, format: int64, description: snowflake res_id }
-        competition_id: { type: integer, format: int64 }
-        title:          { type: string }
-        message:        { type: string }
-        created_at:     { type: string, format: date-time }
-
-    LeaderboardEntry:
-      type: object
-      properties:
-        rank:           { type: integer }
-        user_id:        { type: string }
-        total_score:    { type: integer }
-        last_solve_time: { type: string, format: date-time }
+    # ── 通用 ──
 
     Error:
       type: object
       properties:
         error: { type: string }
 
+    # ── Auth schemas ──
+
+    User:
+      type: object
+      properties:
+        id:         { type: string, description: res_id }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        username:   { type: string }
+        role:       { type: string }
+        team_id:    { type: string, description: 所属队伍 res_id，可为空 }
+
+    Team:
+      type: object
+      properties:
+        id:          { type: string, description: res_id }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        name:        { type: string }
+        description: { type: string }
+
+    # ── CTF schemas ──
+
+    Challenge:
+      type: object
+      properties:
+        id:          { type: string, description: res_id }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        title:       { type: string }
+        category:    { type: string }
+        description: { type: string }
+        score:       { type: integer }
+        is_enabled:  { type: boolean }
+
+    Submission:
+      type: object
+      properties:
+        id:             { type: string, description: res_id }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+        user_id:        { type: string }
+        challenge_id:   { type: string }
+        competition_id: { type: string }
+        submitted_flag: { type: string }
+        is_correct:     { type: boolean }
+
+    Competition:
+      type: object
+      properties:
+        id:          { type: string, description: res_id }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        title:       { type: string }
+        description: { type: string }
+        start_time:  { type: string, format: date-time }
+        end_time:    { type: string, format: date-time }
+        is_active:   { type: boolean }
+
+    Notification:
+      type: object
+      properties:
+        id:             { type: string, description: res_id }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+        competition_id: { type: string }
+        title:          { type: string }
+        message:        { type: string }
+
+    Hint:
+      type: object
+      properties:
+        id:         { type: string, description: res_id }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        content:    { type: string }
+        is_visible: { type: boolean }
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:            { type: integer }
+        user_id:         { type: string }
+        total_score:     { type: integer }
+        last_solve_time: { type: string, format: date-time }
+        challenges:
+          type: array
+          items:
+            type: object
+            properties:
+              challenge_id: { type: string }
+              solved:       { type: boolean }
+              blood_rank:   { type: integer, description: 一二三血排名（1/2/3），仅已解且有排名时返回 }
+              solved_at:    { type: string, format: date-time }
+
+    TopThreeChallenge:
+      type: object
+      properties:
+        challenge_id: { type: string }
+        title:        { type: string }
+        category:     { type: string }
+        score:        { type: integer }
+        top_three:
+          type: array
+          items:
+            type: object
+            properties:
+              ranking:    { type: integer, description: 排名 1-3 }
+              user_id:    { type: string }
+              created_at: { type: string, format: date-time }
+
+    AnalyticsOverview:
+      type: object
+      properties:
+        total_users:               { type: integer }
+        total_challenges:          { type: integer }
+        total_submissions:         { type: integer }
+        correct_submissions:       { type: integer }
+        average_solves:            { type: number }
+        average_solve_time_seconds: { type: string, description: 格式化为两位小数的字符串 }
+        completion_rate:           { type: number }
+
+    AnalyticsCategory:
+      type: object
+      properties:
+        category:              { type: string }
+        total_challenges:      { type: integer }
+        total_solves:          { type: integer }
+        unique_users_solved:   { type: integer }
+        average_solves_per_user: { type: number }
+        success_rate:          { type: number }
+
+    AnalyticsUser:
+      type: object
+      properties:
+        user_id:         { type: string }
+        total_solves:    { type: integer }
+        total_score:     { type: integer }
+        total_attempts:  { type: integer }
+        success_rate:    { type: number }
+        first_solve_time: { type: string, format: date-time }
+        last_solve_time:  { type: string, format: date-time }
+
+    AnalyticsChallenge:
+      type: object
+      properties:
+        challenge_id:             { type: string }
+        title:                    { type: string }
+        category:                 { type: string }
+        score:                    { type: integer }
+        total_solves:             { type: integer }
+        total_attempts:           { type: integer }
+        success_rate:             { type: number }
+        unique_users_solved:      { type: integer }
+        first_solve_time:         { type: string, format: date-time }
+        average_solve_time_seconds: { type: string, description: 格式化为两位小数的字符串 }
+
+    SubmitResult:
+      type: object
+      properties:
+        success: { type: boolean }
+        message:
+          type: string
+          enum: [correct, incorrect, already_solved]
+
 security:
   - BearerAuth: []
 
+# ══════════════════════════════════════════
+#  Auth 服务器路由（端口 8081）
+# ══════════════════════════════════════════
+
 paths:
+  # ─── Auth - 公共路由（无认证） ───
+
+  /api/v1/register:
+    post:
+      summary: 注册用户
+      description: 创建新用户，返回用户信息（不含密码）
+      security: []
+      servers:
+        - url: http://localhost:8081
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, maxLength: 255 }
+                password: { type: string }
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:       { type: string }
+                  username: { type: string }
+                  role:     { type: string }
+        '400':
+          description: 用户名或密码为空
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: 用户名已存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/login:
+    post:
+      summary: 用户登录
+      description: 验证用户名密码，返回 JWT token
+      security: []
+      servers:
+        - url: http://localhost:8081
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: JWT token }
+        '401':
+          description: 用户名或密码错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/verify:
+    post:
+      summary: 验证 JWT token
+      description: 内部接口，CTF 中间件调用此端点验证 token 有效性
+      security: []
+      servers:
+        - url: http://localhost:8081
+      responses:
+        '200':
+          description: token 有效
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string }
+                  role:    { type: string }
+        '401':
+          description: token 无效或缺失
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── Auth - 队伍路由（需认证） ───
+
+  /api/v1/teams:
+    get:
+      summary: 获取队伍列表
+      servers:
+        - url: http://localhost:8081
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Team'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{id}:
+    get:
+      summary: 获取单个队伍
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{id}/members:
+    get:
+      summary: 获取队伍成员列表
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── Auth - 管理员队伍路由 ───
+
+  /api/v1/admin/teams:
+    post:
+      summary: 创建队伍
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8081
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:        { type: string, maxLength: 255 }
+                description: { type: string, maxLength: 4096 }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/teams/{id}:
+    put:
+      summary: 更新队伍
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:        { type: string, maxLength: 255 }
+                description: { type: string, maxLength: 4096 }
+      responses:
+        '204':
+          description: 更新成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      summary: 删除队伍
+      description: 需要 admin 角色。删除前自动移除所有成员
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '204':
+          description: 删除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/teams/{id}/members:
+    post:
+      summary: 添加队伍成员
+      description: 需要 admin 角色。将用户加入队伍
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, description: 用户 res_id }
+      responses:
+        '200':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: ok }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/teams/{id}/members/{user_id}:
+    delete:
+      summary: 移除队伍成员
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: 用户 res_id
+      responses:
+        '204':
+          description: 移除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ══════════════════════════════════════════
+  #  CTF 服务器路由（端口 8080）
+  # ══════════════════════════════════════════
+
   # ─── 题目 ───
 
   /api/v1/challenges:
     get:
       summary: 获取题目列表
       description: 返回所有已启用的题目，不含 flag 字段
+      servers:
+        - url: http://localhost:8080
       responses:
         '200':
           description: 成功
@@ -105,17 +579,17 @@ paths:
     get:
       summary: 获取单个题目
       description: 返回指定已启用题目的详情，不含 flag 字段
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Challenge' }
+              schema:
+                $ref: '#/components/schemas/Challenge'
         '401':
           description: 未认证
           content:
@@ -127,57 +601,14 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/challenges/{id}/submit:
-    post:
-      summary: 提交 flag（全局）
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [flag]
-              properties:
-                flag: { type: string, example: "flag{hello_world}" }
-      responses:
-        '200':
-          description: 提交结果
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  message:
-                    type: string
-                    enum: [correct, incorrect, already_solved]
-        '400':
-          description: 缺少 flag 字段
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: 未认证
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: 题目不存在
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
   # ─── 比赛 ───
 
   /api/v1/competitions:
     get:
       summary: 获取活跃比赛列表
-      description: 返回所有 is_active=1 的比赛
+      description: 返回所有 is_active=1 且未软删除的比赛
+      servers:
+        - url: http://localhost:8080
       responses:
         '200':
           description: 成功
@@ -199,17 +630,17 @@ paths:
   /api/v1/competitions/{id}:
     get:
       summary: 获取单个比赛
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Competition' }
+              schema:
+                $ref: '#/components/schemas/Competition'
         '401':
           description: 未认证
           content:
@@ -224,11 +655,10 @@ paths:
   /api/v1/competitions/{id}/challenges:
     get:
       summary: 获取比赛的题目列表
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
@@ -247,18 +677,27 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  # ─── 提交 flag ───
+
   /api/v1/competitions/{comp_id}/challenges/{id}/submit:
     post:
       summary: 在比赛中提交 flag
+      description: |
+        提交 flag 到指定比赛的指定题目。正确提交会触发 EventCorrectSubmission 事件，
+        topthree 插件记录一血/二血/三血。按用户 ID 限流（3 次/10 秒）。
+      servers:
+        - url: http://localhost:8080
       parameters:
         - name: comp_id
           in: path
           required: true
-          schema: { type: integer, format: int64 }
+          schema: { type: string }
+          description: 比赛 res_id
         - name: id
           in: path
           required: true
-          schema: { type: integer, format: int64 }
+          schema: { type: string }
+          description: 题目 res_id
       requestBody:
         required: true
         content:
@@ -267,19 +706,14 @@ paths:
               type: object
               required: [flag]
               properties:
-                flag: { type: string }
+                flag: { type: string, example: "flag{hello_world}" }
       responses:
         '200':
           description: 提交结果
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  message:
-                    type: string
-                    enum: [correct, incorrect, already_solved]
+                $ref: '#/components/schemas/SubmitResult'
         '400':
           description: 缺少 flag 字段
           content:
@@ -295,6 +729,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: 请求过于频繁
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   # ─── 管理员 - 题目 ───
 
@@ -302,6 +741,8 @@ paths:
     post:
       summary: 创建题目
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       requestBody:
         required: true
         content:
@@ -323,7 +764,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  id: { type: integer, format: int64 }
+                  id: { type: string }
         '400':
           description: 参数错误
           content:
@@ -344,11 +785,10 @@ paths:
     put:
       summary: 更新题目
       description: 需要 admin 角色，只更新传入的非零字段
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       requestBody:
         required: true
         content:
@@ -363,7 +803,8 @@ paths:
                 flag:        { type: string, maxLength: 255 }
                 is_enabled:  { type: boolean }
       responses:
-        '204': { description: 更新成功 }
+        '204':
+          description: 更新成功
         '400':
           description: 参数错误
           content:
@@ -386,20 +827,15 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
     delete:
-      summary: 删除题目
+      summary: 删除题目（软删除）
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
-        '204': { description: 删除成功 }
-        '400':
-          description: 参数错误
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+        '204':
+          description: 删除成功
         '401':
           description: 未认证
           content:
@@ -413,17 +849,14 @@ paths:
 
   # ─── 管理员 - 提交记录 ───
 
-  /api/v1/admin/submissions:
+  /api/v1/admin/competitions/{id}/submissions:
     get:
-      summary: 查看提交记录
-      description: 需要 admin 角色，支持按 user_id 和 challenge_id 过滤
+      summary: 查看比赛提交记录
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: user_id
-          in: query
-          schema: { type: string }
-        - name: challenge_id
-          in: query
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
@@ -453,6 +886,8 @@ paths:
     post:
       summary: 创建比赛
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       requestBody:
         required: true
         content:
@@ -473,7 +908,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  id: { type: integer, format: int64 }
+                  id: { type: string }
         '400':
           description: 参数错误
           content:
@@ -493,6 +928,8 @@ paths:
     get:
       summary: 获取所有比赛（含未激活）
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       responses:
         '200':
           description: 成功
@@ -520,11 +957,10 @@ paths:
     put:
       summary: 更新比赛
       description: 需要 admin 角色，只更新传入的非零字段
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       requestBody:
         required: true
         content:
@@ -538,7 +974,8 @@ paths:
                 end_time:    { type: string, format: date-time }
                 is_active:   { type: boolean }
       responses:
-        '204': { description: 更新成功 }
+        '204':
+          description: 更新成功
         '400':
           description: 参数错误
           content:
@@ -561,20 +998,15 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
     delete:
-      summary: 删除比赛
+      summary: 删除比赛（软删除）
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
-        '204': { description: 删除成功 }
-        '400':
-          description: 参数错误
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+        '204':
+          description: 删除成功
         '401':
           description: 未认证
           content:
@@ -590,11 +1022,10 @@ paths:
     post:
       summary: 为比赛添加题目
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       requestBody:
         required: true
         content:
@@ -603,7 +1034,7 @@ paths:
               type: object
               required: [challenge_id]
               properties:
-                challenge_id: { type: integer, format: int64 }
+                challenge_id: { type: string }
       responses:
         '201':
           description: 添加成功
@@ -612,7 +1043,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  id: { type: integer, format: int64 }
+                  id: { type: string }
         '400':
           description: 参数错误
           content:
@@ -633,17 +1064,124 @@ paths:
     delete:
       summary: 从比赛中移除题目
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
         - name: challenge_id
           in: path
           required: true
-          schema: { type: integer, format: int64 }
+          schema: { type: string }
+          description: 题目 res_id
       responses:
-        '204': { description: 移除成功 }
+        '204':
+          description: 移除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/competitions/{id}/start:
+    post:
+      summary: 开始比赛
+      description: 需要 admin 角色。将比赛标记为进行中
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 开始成功，返回更新后的比赛对象
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 比赛不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: 比赛已经开始
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/competitions/{id}/end:
+    post:
+      summary: 结束比赛
+      description: 需要 admin 角色。将比赛标记为已结束
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 结束成功，返回更新后的比赛对象
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 比赛不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: 比赛已经结束
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── 管理员 - 通知 ───
+
+  /api/v1/admin/competitions/{id}/notifications:
+    post:
+      summary: 为比赛创建通知
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, message]
+              properties:
+                title:   { type: string, maxLength: 255 }
+                message: { type: string, maxLength: 4096 }
+      responses:
+        '201':
+          description: 创建成功
         '400':
           description: 参数错误
           content:
@@ -660,31 +1198,30 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  # ─── 管理员 - 通知 ───
+  # ─── 管理员 - 提示 ───
 
-  /api/v1/admin/competitions/{id}/notifications:
+  /api/v1/admin/challenges/{id}/hints:
     post:
-      summary: 为比赛创建通知
+      summary: 为题目创建提示
       description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [title, message]
+              required: [content]
               properties:
-                title:   { type: string }
-                message: { type: string }
+                content: { type: string }
       responses:
-        '201': { description: 创建成功 }
+        '201':
+          description: 创建成功
         '400':
-          description: 参数错误（title 和 message 不能为空）
+          description: 内容为空
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -699,16 +1236,139 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/admin/hints/{id}:
+    put:
+      summary: 更新提示
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:    { type: string }
+                is_visible: { type: boolean }
+      responses:
+        '204':
+          description: 更新成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 提示不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      summary: 删除提示（软删除）
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '204':
+          description: 删除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 提示不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/notifications/{id}:
+    put:
+      summary: 更新通知
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:   { type: string, maxLength: 255 }
+                message: { type: string, maxLength: 4096 }
+      responses:
+        '204':
+          description: 更新成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 通知不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      summary: 删除通知（软删除）
+      description: 需要 admin 角色
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '204':
+          description: 删除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 通知不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # ─── 通知 ───
 
   /api/v1/competitions/{id}/notifications:
     get:
       summary: 获取比赛通知列表
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
@@ -727,17 +1387,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  # ─── 提示 ───
+
+  /api/v1/challenges/{id}/hints:
+    get:
+      summary: 获取题目提示列表
+      description: 仅返回 is_visible=true 的提示
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hints:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Hint'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # ─── 排行榜 ───
 
   /api/v1/competitions/{id}/leaderboard:
     get:
       summary: 获取比赛排行榜
-      description: 按总得分降序，同分按最后解题时间升序排列
+      description: 按总得分降序，同分按最后解题时间升序排列。包含每道题的解题状态和一血/二血/三血排名
+      servers:
+        - url: http://localhost:8080
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ResID'
       responses:
         '200':
           description: 成功
@@ -750,6 +1437,132 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/LeaderboardEntry'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── 一二三血 ───
+
+  /api/v1/topthree/competitions/{id}:
+    get:
+      summary: 获取比赛一二三血排名
+      description: 返回每道题的前三名解题者
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  competition_id: { type: string }
+                  challenges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TopThreeChallenge'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── 分析 ───
+
+  /api/v1/competitions/{id}/analytics/overview:
+    get:
+      summary: 比赛概览统计
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsOverview'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/competitions/{id}/analytics/categories:
+    get:
+      summary: 按分类统计
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyticsCategory'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/competitions/{id}/analytics/users:
+    get:
+      summary: 按用户统计
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyticsUser'
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/competitions/{id}/analytics/challenges:
+    get:
+      summary: 按题目统计
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyticsChallenge'
         '401':
           description: 未认证
           content:
