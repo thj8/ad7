@@ -265,7 +265,7 @@ func (s *Store) DeleteCompetition(ctx context.Context, resID string) error {
 		return fmt.Errorf("soft delete competition challenges for %s: %w", resID, err)
 	}
 	// 软删除比赛本身
-	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ?`, resID)
+	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ? AND is_deleted = 0`, resID)
 	return fmt.Errorf("delete competition %s: %w", resID, err)
 }
 
