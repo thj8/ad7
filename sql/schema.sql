@@ -60,9 +60,10 @@ CREATE TABLE IF NOT EXISTS competition_challenges (
     competition_id VARCHAR(32) NOT NULL,
     challenge_id   VARCHAR(32) NOT NULL,
     is_deleted     TINYINT(1)  NOT NULL DEFAULT 0,
+    deleted_at     DATETIME     DEFAULT NULL,
     created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE INDEX idx_comp_chal (competition_id, challenge_id)
+    UNIQUE INDEX idx_comp_chal_del (competition_id, challenge_id, deleted_at)
 );
 
 CREATE TABLE IF NOT EXISTS hints (
