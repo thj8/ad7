@@ -11,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"ad7/internal/auth"
 	"ad7/internal/config"
 	"ad7/internal/handler"
 	"ad7/internal/logger"
@@ -61,8 +60,8 @@ func main() {
 	}
 	defer st.Close()
 
-	// 创建 JWT 认证中间件，传入密钥和管理员角色名
-	authMW := middleware.NewAuth(cfg.JWT.Secret, cfg.JWT.AdminRole)
+	// 创建认证中间件，传入认证服务地址和管理员角色名
+	authMW := middleware.NewAuth(cfg.Auth.URL, cfg.JWT.AdminRole)
 
 	// 初始化 Service 层，注入对应的 Store 接口
 	challengeSvc := service.NewChallengeService(st)
@@ -74,23 +73,10 @@ func main() {
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
 	compH := handler.NewCompetitionHandler(compSvc)
 
-	// 初始化认证模块
-	authStore := auth.NewAuthStore(st.DB())
-	authSvc := auth.NewAuthService(authStore, cfg.JWT.Secret, cfg.JWT.AdminRole)
-	teamSvc := auth.NewTeamService(authStore, authStore)
-	authH := auth.NewAuthHandler(authSvc)
-	teamH := auth.NewTeamHandler(teamSvc)
-	authDeps := auth.RouteDeps{Auth: authMW, AuthH: authH, TeamH: teamH}
-
 	// 创建 chi 路由器并挂载全局中间件
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)    // 请求日志记录
 	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
-
-	// 注册认证公共路由（register, login — 不需要 JWT）
-	r.Route("/api/v1", func(r chi.Router) {
-		auth.RegisterPublicRoutes(r, authDeps)
-	})
 
 	// 注册 API v1 路由组（通过 router 包统一注册，需要 JWT）
 	router.RegisterAPIV1(r, router.RouteDeps{
@@ -99,19 +85,6 @@ func main() {
 		ChallengeH:   challengeH,
 		CompetitionH: compH,
 		SubmissionH:  submissionH,
-	})
-
-	// 注册认证路由组（队伍查询，需要 JWT）
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(authMW.Authenticate)
-		auth.RegisterTeamRoutes(r, authDeps)
-	})
-
-	// 注册管理员队伍路由
-	r.Route("/api/v1/admin", func(r chi.Router) {
-		r.Use(authMW.Authenticate)
-		r.Use(authMW.RequireAdmin)
-		auth.RegisterAdminTeamRoutes(r, authDeps)
 	})
 
 	// 初始化所有插件

@@ -124,3 +124,26 @@ func (s *AuthService) GenerateToken(userID, role string) (string, error) {
 	})
 	return token.SignedString(s.secret)
 }
+
+// VerifyToken 验证 JWT token，返回 user_id 和 role。
+func (s *AuthService) VerifyToken(tokenStr string) (string, string, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return s.secret, nil
+	})
+	if err != nil || !token.Valid {
+		return "", "", err
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", "", jwt.ErrSignatureInvalid
+	}
+	userID, _ := claims["sub"].(string)
+	role, _ := claims["role"].(string)
+	if userID == "" || role == "" {
+		return "", "", jwt.ErrSignatureInvalid
+	}
+	return userID, role, nil
+}

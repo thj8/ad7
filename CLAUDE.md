@@ -8,8 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 构建
 go build ./...
 
-# 运行服务器（从项目根目录）
+# 运行 CTF 服务器（从项目根目录）
 go run ./cmd/server -config config.yaml
+
+# 运行认证服务器（从项目根目录）
+go run ./cmd/auth-server -config cmd/auth-server/config.yaml
 
 # 生成测试数据（15个比赛、50个题目、每个比赛30个用户）
 go run ./cmd/seed/
@@ -55,13 +58,14 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - `internal/store/` — `store.go` 定义接口；`mysql.go` 单个 `*Store` 实现所有接口
 - `internal/service/` — 业务逻辑层。`SubmissionService.SubmitInComp` 在正确提交时发布 `EventCorrectSubmission`
 - `internal/handler/` — HTTP 层，使用单独的请求结构体接收 `json:"-"` 的字段
-- `internal/config/` — YAML 配置（`server.port`、`db.*`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
+- `internal/config/` — YAML 配置（`server.port`、`db.*`、`auth.url`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
 - `internal/uuid/` — UUID v4 生成器（32字符十六进制，无连字符）
 - `internal/logger/` — 基于 `log/slog` 的双输出日志（stdout + 可选文件），支持级别配置
-- `internal/auth/` - 一个简单的auth模块，别的模块只能通过http接口和此模块对接
+- `internal/auth/` — 认证模块：用户注册/登录、JWT token 签发和验证、队伍 CRUD + 成员管理。独立运行在 `cmd/auth-server/` 中，通过 HTTP 接口提供服务
+- `cmd/auth-server/` — 独立认证服务器入口，端口 8081。提供 `/api/v1/register`、`/api/v1/login`、`/api/v1/verify`、`/api/v1/teams/*` 等端点
 
 **中间件：**
-- `internal/middleware/auth.go` — JWT 认证（`Authenticate`）和管理员关卡（`RequireAdmin`）。从 claims 提取 `sub`→`user_id` 和 `role` 到 context
+- `internal/middleware/auth.go` — 认证中间件（`Authenticate`）通过 HTTP 调用 auth 服务的 `POST /api/v1/verify` 验证 JWT token，从响应提取 `user_id` 和 `role` 注入 context。`RequireAdmin` 检查 context 中的 role。`NewAuth(authURL, adminRole)` 接收 auth 服务地址而非 JWT secret
 - `internal/middleware/ratelimit.go` — 基于 `httprate` 的限流，支持按 IP 和按用户 ID，用 `r.With(...)` 内联中间件应用到提交路由
 
 **插件系统：**
@@ -87,13 +91,15 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - **无外键**：数据库不使用外键约束
 - **系统日志**：关键操作必须有操作日志, 特别是错误日志，还有flag提交日志
 - **接口限流**：提交端点有按用户 ID 的限流（未认证时回退到 IP 限流）
+- **auth 服务独立部署**：`cmd/auth-server/` 是独立的认证服务，CTF 中间件通过 HTTP 调用 `POST /api/v1/verify` 验证 token。verify 端点本身不需要认证（它验证的就是传入的 token）
 
 ## 集成测试
 
-`internal/integration/` 连接真实 MySQL。每个测试调用 `cleanup(t)` 按依赖顺序清除数据。`testDSN` 从 `TEST_DSN` 环境变量读取，`testSecret` 与生产密钥分开。
+`internal/integration/` 连接真实 MySQL。`testutil.NewTestEnv` 启动两个 httptest.Server：一个 auth 服务（模拟认证服务器）和一个 CTF 服务。每个测试调用 `Cleanup(t)` 按依赖顺序清除数据（含 users、teams 表）。`TEST_DSN` 环境变量配置数据库连接。
 
 ## 约束
-- **auth模块**: 此模块可以单独出来，可以没有此模块，本项目可以对接其他auth模块
+- **auth模块**: 独立 HTTP 服务（`cmd/auth-server/`），CTF 项目通过 `POST /api/v1/verify` 验证 token。CTF 中间件不解析 JWT，仅通过 HTTP 调用 auth 服务。可替换为其他兼容的 auth 服务
+- **双服务架构**: CTF 服务器（端口 8080）和认证服务器（端口 8081）共享同一个 MySQL 数据库，通过 HTTP 通信
 - **新功能**: 每次添加新功能，都必须添加完整的测试用例
 - **修改bug**: 改一个 bug，要写一个测试用例，保证此 bug 不会再次发生
 - **Model基类**: 所有 model 都要基于 BaseModel

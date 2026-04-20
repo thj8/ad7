@@ -17,6 +17,7 @@ type Config struct {
 	JWT       JWTConfig       `yaml:"jwt"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Log       LogConfig       `yaml:"log"`
+	Auth      AuthConfig      `yaml:"auth"`
 }
 
 // ServerConfig 定义 HTTP 服务器的监听端口。
@@ -63,6 +64,11 @@ type LogConfig struct {
 	Level string `yaml:"level"` // 日志级别：debug / info / warn / error
 }
 
+// AuthConfig 定义认证服务的连接参数。
+type AuthConfig struct {
+	URL string `yaml:"url"` // 认证服务地址，如 "http://localhost:8081"
+}
+
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
 // 参数：
 //   - path: 配置文件的文件系统路径
@@ -99,6 +105,10 @@ func Load(path string) (*Config, error) {
 	// 设置默认日志级别
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+	// 设置默认认证服务地址
+	if cfg.Auth.URL == "" {
+		cfg.Auth.URL = "http://localhost:8081"
 	}
 	// 验证必填字段
 	if cfg.JWT.Secret == "" {
