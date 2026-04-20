@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"ad7/internal/auth"
 	"ad7/internal/config"
 	"ad7/internal/handler"
 	"ad7/internal/logger"
@@ -32,7 +33,7 @@ import (
 // 2. 加载配置文件
 // 3. 连接数据库
 // 4. 创建认证中间件
-// 5. 初始化 Service 层（题目、提交、比赛）
+// 5. 初始化 Service 层（题目、提交、比赛、认证）
 // 6. 初始化 Handler 层
 // 7. 注册 chi 路由（含 JWT 认证和管理员权限校验）
 // 8. 加载并注册所有插件
@@ -61,7 +62,7 @@ func main() {
 	defer st.Close()
 
 	// 创建 JWT 认证中间件，传入密钥和管理员角色名
-	auth := middleware.NewAuth(cfg.JWT.Secret, cfg.JWT.AdminRole)
+	authMW := middleware.NewAuth(cfg.JWT.Secret, cfg.JWT.AdminRole)
 
 	// 初始化 Service 层，注入对应的 Store 接口
 	challengeSvc := service.NewChallengeService(st)
@@ -73,18 +74,44 @@ func main() {
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
 	compH := handler.NewCompetitionHandler(compSvc)
 
+	// 初始化认证模块
+	authStore := auth.NewAuthStore(st.DB())
+	authSvc := auth.NewAuthService(authStore, cfg.JWT.Secret, cfg.JWT.AdminRole)
+	teamSvc := auth.NewTeamService(authStore, authStore)
+	authH := auth.NewAuthHandler(authSvc)
+	teamH := auth.NewTeamHandler(teamSvc)
+	authDeps := auth.RouteDeps{Auth: authMW, AuthH: authH, TeamH: teamH}
+
 	// 创建 chi 路由器并挂载全局中间件
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)    // 请求日志记录
 	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
 
-	// 注册 API v1 路由组（通过 router 包统一注册）
+	// 注册认证公共路由（register, login — 不需要 JWT）
+	r.Route("/api/v1", func(r chi.Router) {
+		auth.RegisterPublicRoutes(r, authDeps)
+	})
+
+	// 注册 API v1 路由组（通过 router 包统一注册，需要 JWT）
 	router.RegisterAPIV1(r, router.RouteDeps{
-		Auth:         auth,
+		Auth:         authMW,
 		Config:       cfg,
 		ChallengeH:   challengeH,
 		CompetitionH: compH,
 		SubmissionH:  submissionH,
+	})
+
+	// 注册认证路由组（队伍查询，需要 JWT）
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(authMW.Authenticate)
+		auth.RegisterTeamRoutes(r, authDeps)
+	})
+
+	// 注册管理员队伍路由
+	r.Route("/api/v1/admin", func(r chi.Router) {
+		r.Use(authMW.Authenticate)
+		r.Use(authMW.RequireAdmin)
+		auth.RegisterAdminTeamRoutes(r, authDeps)
 	})
 
 	// 初始化所有插件
@@ -104,7 +131,7 @@ func main() {
 
 	// 注册所有插件路由，传递依赖映射
 	for _, p := range plugins {
-		p.Register(r, st.DB(), auth, pluginMap)
+		p.Register(r, st.DB(), authMW, pluginMap)
 	}
 
 	// 启动 HTTP 服务器

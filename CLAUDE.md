@@ -58,6 +58,7 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - `internal/config/` — YAML 配置（`server.port`、`db.*`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
 - `internal/uuid/` — UUID v4 生成器（32字符十六进制，无连字符）
 - `internal/logger/` — 基于 `log/slog` 的双输出日志（stdout + 可选文件），支持级别配置
+- `internal/auth/` - 一个简单的auth模块，别的模块只能通过http接口和此模块对接
 
 **中间件：**
 - `internal/middleware/auth.go` — JWT 认证（`Authenticate`）和管理员关卡（`RequireAdmin`）。从 claims 提取 `sub`→`user_id` 和 `role` 到 context
@@ -92,6 +93,7 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 `internal/integration/` 连接真实 MySQL。每个测试调用 `cleanup(t)` 按依赖顺序清除数据。`testDSN` 从 `TEST_DSN` 环境变量读取，`testSecret` 与生产密钥分开。
 
 ## 约束
+- **auth模块**: 此模块可以单独出来，可以没有此模块，本项目可以对接其他auth模块
 - **新功能**: 每次添加新功能，都必须添加完整的测试用例
 - **修改bug**: 改一个 bug，要写一个测试用例，保证此 bug 不会再次发生
 - **Model基类**: 所有 model 都要基于 BaseModel
