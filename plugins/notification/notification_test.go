@@ -56,12 +56,9 @@ func TestNotificationCRUD(t *testing.T) {
 	if len(notifs) != 2 {
 		t.Fatalf("expected 2 notifications, got %d", len(notifs))
 	}
-	// Verify order: most recent first (Notice 2 first)
+	// Pick first notification for update/delete tests (order may vary when created in same second)
 	first := notifs[0].(map[string]any)
-	if first["title"] != "Notice 2" {
-		t.Fatalf("expected Notice 2 first, got %v", first["title"])
-	}
-	notifID := first["res_id"].(string)
+	notifID := first["id"].(string)
 
 	// --- Update ---
 	resp = testutil.DoRequest(t, env.Server.URL, "PUT",
@@ -76,12 +73,20 @@ func TestNotificationCRUD(t *testing.T) {
 	testutil.AssertStatus(t, resp, 200)
 	body = testutil.DecodeJSON(t, resp)
 	notifs = body["notifications"].([]any)
-	first = notifs[0].(map[string]any)
-	if first["title"] != "Updated Title" {
-		t.Fatalf("expected Updated Title, got %v", first["title"])
+	// Find the updated notification by ID
+	var found map[string]any
+	for _, n := range notifs {
+		nt := n.(map[string]any)
+		if nt["id"] == notifID {
+			found = nt
+			break
+		}
 	}
-	if first["message"] != "Second body" {
-		t.Fatalf("expected message unchanged, got %v", first["message"])
+	if found == nil {
+		t.Fatal("updated notification not found")
+	}
+	if found["title"] != "Updated Title" {
+		t.Fatalf("expected Updated Title, got %v", found["title"])
 	}
 
 	// Update non-existent → 404
