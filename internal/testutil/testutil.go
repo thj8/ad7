@@ -124,8 +124,15 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	})
 
 	plugins := []plugin.Plugin{leaderboard.New(), notification.New(), analytics.New(), hints.New(), topthree.New()}
+
+	// 构建插件名称到实例的映射，用于依赖注入
+	pluginMap := make(map[string]plugin.Plugin)
 	for _, p := range plugins {
-		p.Register(r, st.DB(), auth)
+		pluginMap[p.Name()] = p
+	}
+
+	for _, p := range plugins {
+		p.Register(r, st.DB(), auth, pluginMap)
 	}
 
 	return &TestEnv{

@@ -13,6 +13,7 @@ import (
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
+	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
 )
@@ -22,6 +23,11 @@ type Plugin struct{ db *sql.DB }
 
 // New 创建提示插件实例。
 func New() *Plugin { return &Plugin{} }
+
+// Name 返回插件名称
+func (p *Plugin) Name() string {
+	return plugin.NameHints
+}
 
 // hint 表示一条题目提示。
 type hint struct {
@@ -51,7 +57,7 @@ type updateReq struct {
 //
 // 用户路由：
 //   - GET /api/v1/challenges/{id}/hints（查看可见提示）
-func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
+func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
 	r.With(auth.Authenticate, auth.RequireAdmin).Post("/api/v1/admin/challenges/{id}/hints", p.create)
 	r.With(auth.Authenticate, auth.RequireAdmin).Put("/api/v1/admin/hints/{id}", p.update)

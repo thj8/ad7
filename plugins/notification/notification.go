@@ -12,6 +12,7 @@ import (
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
+	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
 )
@@ -21,6 +22,11 @@ type Plugin struct{ db *sql.DB }
 
 // New 创建通知插件实例。
 func New() *Plugin { return &Plugin{} }
+
+// Name 返回插件名称
+func (p *Plugin) Name() string {
+	return plugin.NameNotification
+}
 
 // updateReq 是更新通知的请求体结构。
 // 使用指针类型区分"未提供"和"设为空值"。
@@ -37,7 +43,7 @@ type updateReq struct {
 //
 // 用户路由：
 //   - GET /api/v1/competitions/{id}/notifications（查看通知列表）
-func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
+func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
 	r.With(auth.Authenticate, auth.RequireAdmin).Post("/api/v1/admin/competitions/{id}/notifications", p.createForComp)
 	r.With(auth.Authenticate, auth.RequireAdmin).Put("/api/v1/admin/notifications/{id}", p.update)

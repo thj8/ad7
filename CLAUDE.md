@@ -64,13 +64,14 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - `internal/middleware/ratelimit.go` — 基于 `httprate` 的限流，支持按 IP 和按用户 ID，用 `r.With(...)` 内联中间件应用到提交路由
 
 **插件系统：**
-- `internal/plugin/` — `Plugin` 接口：`Register(r chi.Router, db *sql.DB, auth *middleware.Auth)`。插件接收原始 `*sql.DB`，绕过 service 层直接写 SQL
-- `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口（支持事务）、共享查询函数
-- `plugins/leaderboard/` — 每个比赛的排行榜（总分降序，同分按解题时间升序）
+- `internal/plugin/` — `Plugin` 接口：`Name() string` 和 `Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]Plugin)`。插件通过名称标识，支持依赖注入
+- `internal/plugin/names.go` — 插件名称常量：`NameLeaderboard`、`NameNotification`、`NameHints`、`NameAnalytics`、`NameTopThree`
+- `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口、共享查询函数（`GetCompChallenges`、`GetCorrectSubmissions`、`GetUserScores` 等）
+- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，实现 `TopThreeProvider` 接口暴露给其他插件
+- `plugins/leaderboard/` — 每个比赛的排行榜，通过 `TopThreeProvider` 接口获取三血数据，不直接查询 topthree_records 表
 - `plugins/notification/` — 每个比赛的通知（管理员创建，所有用户查看）
 - `plugins/hints/` — 题目提示（管理员管理，用户查看可见提示）
-- `plugins/analytics/` — 比赛分析（概览、分类、用户、题目四个端点）
-- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，异步更新排名
+- `plugins/analytics/` — 比赛分析，所有查询通过 `pluginutil` 共享函数，无直接 SQL
 
 **事件系统：**
 - `internal/event/` — 进程内 pub/sub，基于 `sync.RWMutex`。`Publish` 在独立 goroutine 中调用订阅者，不阻塞发布者。当前事件类型：`EventCorrectSubmission`
@@ -81,7 +82,7 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - **BaseModel**：所有 model 嵌入 `BaseModel`（`id`、`res_id`、`created_at`、`updated_at`、`is_deleted`）。所有查询包含 `WHERE is_deleted = 0` 软删除过滤
 - **单一store**：`*store.Store` 实现所有 store 接口，传递给所有 service
 - **比赛范围**：没有全局排行榜或通知。所有内容限定在比赛范围内。向后兼容支持比赛外提交
-- **插件直连 DB**：插件接收 `*sql.DB` 直接写 SQL，通过 `pluginutil` 共享通用查询
+- **插件数据库访问限制**：插件不允许直接查询主表，只能查询自己的表。主表查询必须通过 `pluginutil` 共享函数。插件间通信通过接口（如 `TopThreeProvider`）
 - **无外键**：数据库不使用外键约束
 - **系统日志**：关键操作必须有操作日志, 特别是错误日志，还有flag提交日志
 - **接口限流**：提交端点有按用户 ID 的限流（未认证时回退到 IP 限流）
@@ -96,4 +97,4 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - **Model基类**: 所有 model 都要基于 BaseModel
 - **函数参数**: 所有函数参数不能多于4个，采用结构体封装
 - **输入验证**: 字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）
-- **查询数据库**: 插件不允许直接查询数据库，仅可以查自己插件的数据库
+- **查询数据库**: 插件不允许直接查询数据库，仅可以查自己插件的数据库, 不能写 SQL 查主表，必须用 pluginutil 中的共享查询函数

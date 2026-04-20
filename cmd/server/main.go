@@ -87,7 +87,7 @@ func main() {
 		SubmissionH:  submissionH,
 	})
 
-	// 初始化所有插件并注册路由
+	// 初始化所有插件
 	plugins := []plugin.Plugin{
 		leaderboard.New(),  // 排行榜插件
 		notification.New(), // 通知插件
@@ -95,8 +95,16 @@ func main() {
 		topthree.New(),     // 一二三血插件
 		hints.New(),        // 题目提示插件
 	}
+
+	// 构建插件名称到实例的映射，用于依赖注入
+	pluginMap := make(map[string]plugin.Plugin)
 	for _, p := range plugins {
-		p.Register(r, st.DB(), auth)
+		pluginMap[p.Name()] = p
+	}
+
+	// 注册所有插件路由，传递依赖映射
+	for _, p := range plugins {
+		p.Register(r, st.DB(), auth, pluginMap)
 	}
 
 	// 启动 HTTP 服务器
