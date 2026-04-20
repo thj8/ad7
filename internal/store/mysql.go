@@ -257,9 +257,12 @@ func (s *Store) UpdateCompetition(ctx context.Context, c *model.Competition) err
 
 // DeleteCompetition 软删除比赛。先删除该比赛的题目关联记录，再将比赛标记为已删除。
 func (s *Store) DeleteCompetition(ctx context.Context, resID string) error {
-	// 先清理比赛与题目的关联记录
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM competition_challenges WHERE competition_id = ?`, resID); err != nil {
-		return fmt.Errorf("delete competition challenges for %s: %w", resID, err)
+	// 软删除比赛与题目的关联记录
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE competition_challenges
+		 SET is_deleted = 1, deleted_at = NOW()
+		 WHERE competition_id = ? AND deleted_at IS NULL`, resID); err != nil {
+		return fmt.Errorf("soft delete competition challenges for %s: %w", resID, err)
 	}
 	// 软删除比赛本身
 	_, err := s.db.ExecContext(ctx, `UPDATE competitions SET is_deleted=1 WHERE res_id = ?`, resID)
