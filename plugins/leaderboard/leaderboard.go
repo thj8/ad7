@@ -13,19 +13,37 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
+	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
+	"ad7/plugins/topthree"
 )
 
-// Plugin 是排行榜插件，持有数据库连接。
-type Plugin struct{ db *sql.DB }
+// Plugin 是排行榜插件，持有数据库连接和依赖。
+type Plugin struct {
+	db        *sql.DB
+	topThree  topthree.TopThreeProvider
+}
 
 // New 创建排行榜插件实例。
 func New() *Plugin { return &Plugin{} }
 
+// Name 返回插件名称
+func (p *Plugin) Name() string {
+	return plugin.NameLeaderboard
+}
+
 // Register 注册排行榜的路由。
 // 路由：GET /api/v1/competitions/{id}/leaderboard（需要认证）
-func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
+func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+
+	// 从依赖中获取 topthree 插件的 TopThreeProvider 接口
+	if topThreePlugin, ok := deps[plugin.NameTopThree]; ok {
+		if provider, ok := topThreePlugin.(topthree.TopThreeProvider); ok {
+			p.topThree = provider
+		}
+	}
+
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/leaderboard", p.listByComp)
 }
 
@@ -84,26 +102,23 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		userSolves[fs.UserID][fs.ChallengeID] = fs.SolvedAt
 	}
 
-	// 3. 查询 topthree_records 获取一二三血排名（私有表，保留在插件内）
-	bloodRows, err := p.db.QueryContext(ctx, `
-		SELECT user_id, challenge_id, ranking
-		FROM topthree_records
-		WHERE competition_id = ? AND ranking IN (1,2,3) AND is_deleted = 0`, compID)
-	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
-	}
-	defer bloodRows.Close()
-
+	// 3. 通过 TopThreeProvider 接口获取一二三血排名
 	bloodRank := make(map[string]int)
-	for bloodRows.Next() {
-		var uid, chalID string
-		var rank int
-		if err := bloodRows.Scan(&uid, &chalID, &rank); err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+	if p.topThree != nil {
+		topThreeMap, err := p.topThree.GetCompTopThree(ctx, compID)
+		if err == nil {
+			for chalID, entry := range topThreeMap {
+				if entry.FirstBlood != "" {
+					bloodRank[entry.FirstBlood+":"+chalID] = 1
+				}
+				if entry.SecondBlood != "" {
+					bloodRank[entry.SecondBlood+":"+chalID] = 2
+				}
+				if entry.ThirdBlood != "" {
+					bloodRank[entry.ThirdBlood+":"+chalID] = 3
+				}
+			}
 		}
-		bloodRank[uid+":"+chalID] = rank
 	}
 
 	// 4. 计算总分

@@ -18,8 +18,13 @@ import (
 //
 // 参数：
 //   - r: chi 路由器，用于注册路由
-//   - db: 数据库连接，供插件直接执行 SQL
+//   - db: 数据库连接，供插件查询自己的表
 //   - auth: 认证中间件，用于保护插件路由
+//   - deps: 已初始化的依赖插件，key 是插件名称
 type Plugin interface {
-	Register(r chi.Router, db *sql.DB, auth *middleware.Auth)
+	// Name 返回插件的唯一名称，用于依赖管理
+	Name() string
+
+	// Register 方法在服务启动时被调用
+	Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]Plugin)
 }

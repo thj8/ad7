@@ -13,6 +13,7 @@ import (
 
 	"ad7/internal/event"
 	"ad7/internal/middleware"
+	"ad7/internal/plugin"
 	"ad7/internal/uuid"
 )
 
@@ -26,10 +27,15 @@ func New() *Plugin {
 	return &Plugin{}
 }
 
+// Name 返回插件名称
+func (p *Plugin) Name() string {
+	return plugin.NameTopThree
+}
+
 // Register 注册三血插件的路由并订阅正确提交事件。
 // 路由：GET /api/v1/topthree/competitions/{id}（需要认证）
 // 同时订阅 EventCorrectSubmission 事件，用于实时更新三血排名。
-func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
+func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
 
 	// 订阅正确提交事件，触发三血排名更新
@@ -209,4 +215,58 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	if err := tx.Commit(); err != nil {
 		log.Printf("[topthree] 提交事务失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
 	}
+}
+
+// GetBloodRank 获取用户在某道题目的三血排名
+// 返回值: 1=一血, 2=二血, 3=三血, 0=未入榜, -1=查询错误
+func (p *Plugin) GetBloodRank(ctx context.Context, compID, chalID, userID string) (int, error) {
+	var ranking int
+	err := p.db.QueryRowContext(ctx, `
+		SELECT ranking FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND user_id = ? AND is_deleted = 0
+		LIMIT 1
+	`, compID, chalID, userID).Scan(&ranking)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return -1, err
+	}
+	return ranking, nil
+}
+
+// GetCompTopThree 获取比赛每道题目的三血信息
+// 返回值: map[challengeID]BloodRankEntry
+func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT challenge_id, user_id, ranking
+		FROM topthree_records
+		WHERE competition_id = ? AND is_deleted = 0 AND ranking <= 3
+		ORDER BY ranking ASC
+	`, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]BloodRankEntry)
+	for rows.Next() {
+		var chalID, userID string
+		var ranking int
+		if err := rows.Scan(&chalID, &userID, &ranking); err != nil {
+			return nil, err
+		}
+		entry := result[chalID]
+		entry.ChallengeID = chalID
+		switch ranking {
+		case 1:
+			entry.FirstBlood = userID
+		case 2:
+			entry.SecondBlood = userID
+		case 3:
+			entry.ThirdBlood = userID
+		}
+		result[chalID] = entry
+	}
+	return result, rows.Err()
 }
