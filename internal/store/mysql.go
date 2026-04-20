@@ -277,12 +277,14 @@ func (s *Store) AddChallenge(ctx context.Context, compID, chalID string) error {
 	return fmt.Errorf("error: %w", err)
 }
 
-// RemoveChallenge 从比赛中移除一道题目的关联记录（硬删除）。
+// RemoveChallenge 从比赛中移除一道题目的关联记录（软删除）。
 func (s *Store) RemoveChallenge(ctx context.Context, compID, chalID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM competition_challenges WHERE competition_id = ? AND challenge_id = ?`,
+		`UPDATE competition_challenges
+		 SET is_deleted = 1, deleted_at = NOW()
+		 WHERE competition_id = ? AND challenge_id = ? AND deleted_at IS NULL`,
 		compID, chalID)
-	return fmt.Errorf("error: %w", err)
+	return fmt.Errorf("soft remove challenge: %w", err)
 }
 
 // ListCompChallenges 查询指定比赛中所有已启用且未删除的题目。
