@@ -81,6 +81,10 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 **事件系统：**
 - `internal/event/` — 进程内 pub/sub，基于 `sync.RWMutex`。`Publish` 在独立 goroutine 中调用订阅者，不阻塞发布者。当前事件类型：`EventCorrectSubmission`
 
+## 文档
+**API接口** ：@openapi.yaml
+
+
 ## 关键设计决策
 
 - **UUID res_id**：所有实体使用 `res_id VARCHAR(32)` 作为公开 ID。自增 `id` 列 `json:"-"` 仅内部使用。API 路径和响应仅使用 `res_id`

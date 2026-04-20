@@ -4,3 +4,4 @@ config.yaml
 server
 .claude/settings.local.json
 .worktrees/
+auth-server
