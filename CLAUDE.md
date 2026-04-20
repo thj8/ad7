@@ -79,13 +79,12 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 
 - **UUID res_id**：所有实体使用 `res_id VARCHAR(32)` 作为公开 ID。自增 `id` 列 `json:"-"` 仅内部使用。API 路径和响应仅使用 `res_id`
 - **BaseModel**：所有 model 嵌入 `BaseModel`（`id`、`res_id`、`created_at`、`updated_at`、`is_deleted`）。所有查询包含 `WHERE is_deleted = 0` 软删除过滤
-- **Flag 字段**：`model.Challenge.Flag` 是 `json:"-"`。Handler 使用单独请求结构体解码 flag，手动赋值给 model
-- **单一 store**：`*store.Store` 实现所有 store 接口，传递给所有 service
+- **单一store**：`*store.Store` 实现所有 store 接口，传递给所有 service
 - **比赛范围**：没有全局排行榜或通知。所有内容限定在比赛范围内。向后兼容支持比赛外提交
 - **插件直连 DB**：插件接收 `*sql.DB` 直接写 SQL，通过 `pluginutil` 共享通用查询
 - **无外键**：数据库不使用外键约束
 - **系统日志**：关键操作必须有操作日志, 特别是错误日志，还有flag提交日志
-- **限流**：提交端点有按用户 ID 的限流（未认证时回退到 IP 限流）
+- **接口限流**：提交端点有按用户 ID 的限流（未认证时回退到 IP 限流）
 
 ## 集成测试
 
@@ -93,7 +92,8 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 
 ## 约束
 - **新功能**: 每次添加新功能，都必须添加完整的测试用例
-- **bug**: 改一个 bug，要写一个测试用例，保证此 bug 不会再次发生
+- **修改bug**: 改一个 bug，要写一个测试用例，保证此 bug 不会再次发生
 - **Model基类**: 所有 model 都要基于 BaseModel
 - **函数参数**: 所有函数参数不能多于4个，采用结构体封装
 - **输入验证**: 字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）
+- **查询数据库**: 插件不允许直接查询数据库，仅可以查自己插件的数据库
