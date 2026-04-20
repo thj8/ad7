@@ -22,13 +22,26 @@ type Plugin struct{ db *sql.DB }
 // New 创建通知插件实例。
 func New() *Plugin { return &Plugin{} }
 
+// updateReq 是更新通知的请求体结构。
+// 使用指针类型区分"未提供"和"设为空值"。
+type updateReq struct {
+	Title   *string `json:"title"`   // 通知标题（可选）
+	Message *string `json:"message"` // 通知内容（可选）
+}
+
 // Register 注册通知相关的路由。
-// 路由：
-//   - POST /api/v1/admin/competitions/{id}/notifications（管理员，创建通知）
-//   - GET /api/v1/competitions/{id}/notifications（认证用户，查看通知列表）
+// 管理员路由：
+//   - POST /api/v1/admin/competitions/{id}/notifications（创建通知）
+//   - PUT /api/v1/admin/notifications/{id}（更新通知）
+//   - DELETE /api/v1/admin/notifications/{id}（删除通知）
+//
+// 用户路由：
+//   - GET /api/v1/competitions/{id}/notifications（查看通知列表）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth) {
 	p.db = db
 	r.With(auth.Authenticate, auth.RequireAdmin).Post("/api/v1/admin/competitions/{id}/notifications", p.createForComp)
+	r.With(auth.Authenticate, auth.RequireAdmin).Put("/api/v1/admin/notifications/{id}", p.update)
+	r.With(auth.Authenticate, auth.RequireAdmin).Delete("/api/v1/admin/notifications/{id}", p.delete)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/notifications", p.listByComp)
 }
 
@@ -92,4 +105,91 @@ func (p *Plugin) createForComp(w http.ResponseWriter, r *http.Request) {
 	}
 	logger.Info("notification created", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "competition_id", compID)
 	w.WriteHeader(http.StatusCreated)
+}
+
+// update 处理更新通知的请求（管理员）。
+func (p *Plugin) update(w http.ResponseWriter, r *http.Request) {
+	notifID := chi.URLParam(r, "id")
+	if err := pluginutil.ParseID(notifID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid notification id")
+		return
+	}
+
+	var req updateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	if req.Title != nil && (len(*req.Title) == 0 || len(*req.Title) > 255) {
+		pluginutil.WriteError(w, http.StatusBadRequest, "title must be 1-255 chars")
+		return
+	}
+	if req.Message != nil && (len(*req.Message) == 0 || len(*req.Message) > 4096) {
+		pluginutil.WriteError(w, http.StatusBadRequest, "message must be 1-4096 chars")
+		return
+	}
+
+	var currentTitle string
+	var currentMessage string
+	err := p.db.QueryRowContext(r.Context(),
+		`SELECT title, message FROM notifications WHERE res_id = ? AND is_deleted = 0`, notifID).
+		Scan(&currentTitle, &currentMessage)
+	if err == sql.ErrNoRows {
+		pluginutil.WriteError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	newTitle := currentTitle
+	if req.Title != nil {
+		newTitle = *req.Title
+	}
+	newMessage := currentMessage
+	if req.Message != nil {
+		newMessage = *req.Message
+	}
+
+	_, err = p.db.ExecContext(r.Context(),
+		`UPDATE notifications SET title = ?, message = ? WHERE res_id = ? AND is_deleted = 0`,
+		newTitle, newMessage, notifID)
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	logger.Info("notification updated", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "notification_id", notifID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// delete 处理删除通知的请求（管理员）。
+func (p *Plugin) delete(w http.ResponseWriter, r *http.Request) {
+	notifID := chi.URLParam(r, "id")
+	if err := pluginutil.ParseID(notifID); err != nil {
+		pluginutil.WriteError(w, http.StatusBadRequest, "invalid notification id")
+		return
+	}
+
+	result, err := p.db.ExecContext(r.Context(),
+		`UPDATE notifications SET is_deleted = 1, updated_at = NOW() WHERE res_id = ? AND is_deleted = 0`, notifID)
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if rows == 0 {
+		pluginutil.WriteError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	logger.Info("notification deleted", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "notification_id", notifID)
+	w.WriteHeader(http.StatusNoContent)
 }
