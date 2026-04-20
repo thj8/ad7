@@ -294,7 +294,11 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.
 		`SELECT c.res_id, c.title, c.category, c.description, c.score, c.is_enabled, c.created_at, c.updated_at
 		 FROM challenges c
 		 JOIN competition_challenges cc ON cc.challenge_id = c.res_id
-		 WHERE cc.competition_id = ? AND c.is_enabled = 1 AND c.is_deleted = 0`, compID)
+		 WHERE cc.competition_id = ?
+		   AND cc.is_deleted = 0
+		   AND cc.deleted_at IS NULL
+		   AND c.is_enabled = 1
+		   AND c.is_deleted = 0`, compID)
 	if err != nil {
 		return nil, err
 	}
