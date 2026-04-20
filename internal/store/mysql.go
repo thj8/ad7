@@ -260,8 +260,8 @@ func (s *Store) DeleteCompetition(ctx context.Context, resID string) error {
 	// 软删除比赛与题目的关联记录
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE competition_challenges
-		 SET is_deleted = 1, deleted_at = NOW()
-		 WHERE competition_id = ? AND deleted_at IS NULL`, resID); err != nil {
+		 SET is_deleted = 1
+		 WHERE competition_id = ? AND is_deleted = 0`, resID); err != nil {
 		return fmt.Errorf("soft delete competition challenges for %s: %w", resID, err)
 	}
 	// 软删除比赛本身
@@ -281,8 +281,8 @@ func (s *Store) AddChallenge(ctx context.Context, compID, chalID string) error {
 func (s *Store) RemoveChallenge(ctx context.Context, compID, chalID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE competition_challenges
-		 SET is_deleted = 1, deleted_at = NOW()
-		 WHERE competition_id = ? AND challenge_id = ? AND deleted_at IS NULL`,
+		 SET is_deleted = 1
+		 WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0`,
 		compID, chalID)
 	return fmt.Errorf("soft remove challenge: %w", err)
 }
@@ -296,7 +296,6 @@ func (s *Store) ListCompChallenges(ctx context.Context, compID string) ([]model.
 		 JOIN competition_challenges cc ON cc.challenge_id = c.res_id
 		 WHERE cc.competition_id = ?
 		   AND cc.is_deleted = 0
-		   AND cc.deleted_at IS NULL
 		   AND c.is_enabled = 1
 		   AND c.is_deleted = 0`, compID)
 	if err != nil {
