@@ -164,7 +164,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		JOIN challenges c ON c.res_id = cc.challenge_id AND c.is_deleted = 0
 		LEFT JOIN submissions s ON s.challenge_id = cc.challenge_id
 			AND s.competition_id = cc.competition_id AND s.is_deleted = 0
-		WHERE cc.competition_id = ? AND cc.is_deleted = 0
+		WHERE cc.competition_id = ? AND cc.is_deleted = 0 AND cc.deleted_at IS NULL
 		GROUP BY c.category
 	`, compID)
 	if err != nil {

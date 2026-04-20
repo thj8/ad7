@@ -25,7 +25,7 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 		SELECT c.res_id, c.title, c.category, c.score
 		FROM challenges c
 		INNER JOIN competition_challenges cc ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ? AND c.is_deleted = 0 AND cc.is_deleted = 0
+		WHERE cc.competition_id = ? AND c.is_deleted = 0 AND cc.is_deleted = 0 AND cc.deleted_at IS NULL
 	`, compID)
 	if err != nil {
 		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")

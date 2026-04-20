@@ -38,7 +38,11 @@ func GetCompChallenges(ctx context.Context, db DBTX, compID string) ([]Challenge
 		SELECT c.res_id, c.title, c.category, c.score
 		FROM competition_challenges cc
 		JOIN challenges c ON c.res_id = cc.challenge_id
-		WHERE cc.competition_id = ? AND c.is_enabled = 1 AND c.is_deleted = 0
+		WHERE cc.competition_id = ?
+		  AND cc.is_deleted = 0
+		  AND cc.deleted_at IS NULL
+		  AND c.is_enabled = 1
+		  AND c.is_deleted = 0
 		ORDER BY c.res_id`, compID)
 	if err != nil {
 		return nil, err
@@ -130,7 +134,7 @@ func GetCompDistinctUsers(ctx context.Context, db DBTX, compID string) (int, err
 func GetCompChallengeCount(ctx context.Context, db DBTX, compID string) (int, error) {
 	var count int
 	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ? AND is_deleted = 0
+		SELECT COUNT(*) FROM competition_challenges WHERE competition_id = ? AND is_deleted = 0 AND deleted_at IS NULL
 	`, compID).Scan(&count)
 	return count, err
 }
