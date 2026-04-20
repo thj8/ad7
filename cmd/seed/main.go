@@ -1,27 +1,32 @@
 // Package main 是测试数据填充工具的入口。
-// 用于生成逼真的 CTF 比赛测试数据：15 个比赛、50 道题目、每个比赛 30 个用户。
-// 用户解题率差异化（顶部用户 72%），制造排行榜并列效果。
+// 通过 HTTP 调用 CTF 和 Auth 服务器创建测试数据，
+// 使提交记录走完整链路（service → event → topthree），
+// 从而可以验证一二三血功能是否正常工作。
 package main
 
 import (
-	"database/sql"
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
+	"sync"
 	"time"
-
-	_ "github.com/go-sql-driver/mysql"
-
-	"ad7/internal/uuid"
 )
 
 const (
-	numComps     = 15  // 生成的比赛数量
-	poolSize     = 50  // 题目池大小
-	chalsPerComp = 25  // 每个比赛分配的题目数量
-	usersPerComp = 30  // 每个比赛的模拟用户数量
+	numComps     = 15 // 生成的比赛数量
+	poolSize     = 50 // 题目池大小
+	chalsPerComp = 25 // 每个比赛分配的题目数量
+	usersPerComp = 30 // 每个比赛的模拟用户数量
+
+	// submitDelay 是每个用户两次提交之间的间隔。
+	// 提交端点限流为每用户 3 次/10 秒，4 秒间隔确保不触发限流。
+	submitDelay = 4 * time.Second
 )
 
 // solveCounts 定义每个用户的正确解题数。
@@ -38,7 +43,7 @@ var (
 	// categories 是题目分类列表，循环分配给题目
 	categories = []string{"web", "pwn", "reverse", "crypto", "misc"}
 	// scores 是题目分值列表，循环分配给题目
-	scores     = []int{100, 150, 200, 250, 300, 350, 400, 450, 500}
+	scores = []int{100, 150, 200, 250, 300, 350, 400, 450, 500}
 
 	// compTitles 是 15 个比赛的标题
 	compTitles = []string{
@@ -157,115 +162,220 @@ var (
 		{"杂项签到题", "欢迎参加比赛！", "flag{w3lc0m3_t0_ctf_2026}"},
 	}
 
-	chalCats []string       // 题目分类分配列表
-	chalIdx  map[string]int // 每个分类已使用的模板索引计数器
+	chalIdx map[string]int // 每个分类已使用的模板索引计数器
 )
 
-// dsn 返回数据库连接字符串。
-// 优先使用 TEST_DSN 环境变量，如果未设置则失败。
-func dsn() string {
-	testDSN := os.Getenv("TEST_DSN")
-	if testDSN == "" {
-		log.Fatal("TEST_DSN environment variable is required")
+// ── 配置 ──
+
+func authURL() string {
+	if v := os.Getenv("AUTH_URL"); v != "" {
+		return v
 	}
-	return testDSN
+	return "http://localhost:8081"
 }
 
-// main 是种子数据生成工具的入口。
-// 执行流程：
-//  1. 解析命令行参数（-clean 控制是否先清除现有数据）
-//  2. 初始化随机数生成器和分类计数器
-//  3. 连接数据库
-//  4. 可选地清除现有数据
-//  5. 创建 50 道题目
-//  6. 循环创建 15 个比赛，每个比赛分配题目并生成提交记录
-func main() {
-	clean := flag.Bool("clean", true, "delete all rows before seeding")
-	flag.Parse()
-
-	// 使用当前时间作为随机种子
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	// 初始化题目分类计数器，按循环方式分配分类
-	chalCats = make([]string, 0, poolSize)
-	chalIdx = make(map[string]int)
-	for i := 0; i < poolSize; i++ {
-		cat := categories[i%len(categories)]
-		chalCats = append(chalCats, cat)
+func ctfURL() string {
+	if v := os.Getenv("CTF_URL"); v != "" {
+		return v
 	}
+	return "http://localhost:8080"
+}
 
-	// 连接数据库
-	db, err := sql.Open("mysql", dsn())
+// ── HTTP 辅助函数 ──
+
+// postJSON 发送 POST 请求，body 可以为 nil。
+// token 非空时设置 Authorization 头。
+// 非 2xx 状态码直接 log.Fatalf。
+func postJSON(url string, body any, token string) map[string]any {
+	var bodyReader io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		bodyReader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest("POST", url, bodyReader)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("new request %s: %v", url, err)
 	}
-	defer db.Close()
-	if err := db.Ping(); err != nil {
-		log.Fatalf("ping: %v", err)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
-
-	// 可选清除现有数据
-	if *clean {
-		cleanAll(db)
-		log.Println("cleaned existing data")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-
-	// 第一步：创建 50 道题目的题库
-	chalIDs := createChallenges(db)
-	log.Printf("created %d challenges", len(chalIDs))
-
-	// 第二步：创建 15 个比赛，分配题目并生成提交记录
-	now := time.Now()
-	for i := 0; i < numComps; i++ {
-		compID, start, end := createComp(db, i, now)
-		picked := pickN(rng, chalIDs, chalsPerComp)
-		assignChals(db, compID, picked)
-		genSubmissions(&genSubmissionsConfig{
-			DB:        db,
-			RNG:       rng,
-			CompID:    compID,
-			ChalIDs:   picked,
-			CompStart: start,
-			CompEnd:   end,
-		})
-		log.Printf("competition %02d  id=%s  %s ~ %s  done", i+1, compID,
-			start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatalf("post %s: %v", url, err)
 	}
-
-	log.Println("seed complete!")
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Fatalf("decode %s: %v (%s)", url, err, data)
+	}
+	return m
 }
 
-// ── 辅助函数 ──
+// registerAndLogin 注册用户并返回 JWT token。
+// 如果用户已存在（409），直接登录。
+func registerAndLogin(username, password string) string {
+	b, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	req, _ := http.NewRequest("POST", authURL()+"/api/v1/register", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatalf("register %s: %v", username, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 409 {
+		return login(username, password)
+	}
+	if resp.StatusCode != 201 {
+		data, _ := io.ReadAll(resp.Body)
+		log.Fatalf("register %s: status %d: %s", username, resp.StatusCode, data)
+	}
+	return login(username, password)
+}
 
-// cleanAll 按依赖顺序清除所有表中的数据。
-// 先清除有依赖关系的表（competition_challenges, notifications），
-// 再清除主数据表（submissions, competitions, challenges）。
-func cleanAll(db *sql.DB) {
-	for _, t := range []string{
-		"competition_challenges", "notifications",
-		"submissions", "competitions", "challenges",
-	} {
-		if _, err := db.Exec("DELETE FROM " + t); err != nil {
-			log.Fatalf("clean table %s: %v", t, err)
+func login(username, password string) string {
+	m := postJSON(authURL()+"/api/v1/login", map[string]string{
+		"username": username,
+		"password": password,
+	}, "")
+	tok, ok := m["token"].(string)
+	if !ok {
+		log.Fatalf("login %s: no token in response", username)
+	}
+	return tok
+}
+
+// ── API 调用函数 ──
+
+func apiCreateChallenge(token, title, category, desc string, score int, flag string) string {
+	m := postJSON(ctfURL()+"/api/v1/admin/challenges", map[string]any{
+		"title": title, "category": category, "description": desc,
+		"score": score, "flag": flag,
+	}, token)
+	id, ok := m["id"].(string)
+	if !ok {
+		log.Fatalf("create challenge: no id: %v", m)
+	}
+	return id
+}
+
+func apiCreateCompetition(token, title, desc string, start, end time.Time) string {
+	m := postJSON(ctfURL()+"/api/v1/admin/competitions", map[string]any{
+		"title": title, "description": desc,
+		"start_time": start.Format(time.RFC3339),
+		"end_time":   end.Format(time.RFC3339),
+	}, token)
+	id, ok := m["id"].(string)
+	if !ok {
+		log.Fatalf("create competition: no id: %v", m)
+	}
+	return id
+}
+
+func apiAddChallengeToComp(token, compID, chalID string) {
+	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/challenges",
+		map[string]string{"challenge_id": chalID}, token)
+}
+
+func apiStartComp(token, compID string) {
+	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", nil, token)
+}
+
+func apiEndComp(token, compID string) {
+	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", nil, token)
+}
+
+func apiSubmitFlag(token, compID, chalID, flag string) map[string]any {
+	return postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/challenges/"+chalID+"/submit",
+		map[string]string{"flag": flag}, token)
+}
+
+// ── 随机选取 ──
+
+func pickN(rng *rand.Rand, ids []string, n int) []string {
+	s := make([]string, len(ids))
+	copy(s, ids)
+	rng.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] })
+	return s[:n]
+}
+
+// ── 用户提交任务（并发执行） ──
+
+// userJob 是单个用户在比赛中的提交任务。
+type userJob struct {
+	CompIdx int              // 比赛序号
+	UserIdx int              // 用户序号（0=最强）
+	CompID  string           // 比赛 res_id
+	ChalIDs []string         // 分配到该比赛的题目
+	Flags   map[string]string // res_id → flag
+	RNG     *rand.Rand       // 每个用户独立的随机数生成器
+}
+
+// run 注册用户、登录、按 solveCounts 提交 flag。
+// 每次提交后 sleep submitDelay 以遵守限流规则。
+func (j *userJob) run(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	username := fmt.Sprintf("comp%02d_player_%03d", j.CompIdx+1, j.UserIdx+1)
+	userToken := registerAndLogin(username, "password123")
+
+	nCorrect := solveCounts[j.UserIdx]
+
+	picked := make([]string, len(j.ChalIDs))
+	copy(picked, j.ChalIDs)
+	j.RNG.Shuffle(len(picked), func(i, k int) { picked[i], picked[k] = picked[k], picked[i] })
+
+	correct := picked[:nCorrect]
+	rest := picked[nCorrect:]
+
+	// 正确提交：30% 概率先有一次错误尝试
+	for _, cid := range correct {
+		if j.RNG.Float64() < 0.3 {
+			apiSubmitFlag(userToken, j.CompID, cid, "flag{wrong_attempt}")
+			time.Sleep(submitDelay)
 		}
+		apiSubmitFlag(userToken, j.CompID, cid, j.Flags[cid])
+		time.Sleep(submitDelay)
+	}
+
+	// 未解对的题目：0-2 次错误尝试
+	for i := 0; i < j.RNG.Intn(3) && i < len(rest); i++ {
+		apiSubmitFlag(userToken, j.CompID, rest[i], "flag{wrong_attempt}")
+		time.Sleep(submitDelay)
 	}
 }
 
-// createChallenges 创建一个包含 50 道题目的题库。
-// 题目按分类循环分配，分值也循环分配。
-// 约 3 道题目使用中文模板，其余使用英文模板。
-// 返回所有题目的 res_id 列表。
-func createChallenges(db *sql.DB) []string {
-	ids := make([]string, poolSize)
-	cnCount := 0 // 中文题目计数器（限制约 3 道）
-	for i := range ids {
-		rid := uuid.Next()
+// ── main ──
+
+func main() {
+	flag.Parse()
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	chalIdx = make(map[string]int)
+
+	log.Printf("auth=%s  ctf=%s", authURL(), ctfURL())
+
+	// 注册 admin 用户并获取 token
+	log.Println("registering admin user...")
+	adminToken := registerAndLogin("seed_admin", "seed_admin_password")
+
+	// 创建 50 道题目
+	log.Println("creating challenges...")
+	chalFlags := make(map[string]string)
+	chalIDs := make([]string, poolSize)
+	cnCount := 0
+	for i := range chalIDs {
 		cat := categories[i%len(categories)]
 		sc := scores[i%len(scores)]
-
 		var title, desc, flag string
-
-		// 约每 17 道使用一道中文题目，最多 3 道
 		if cnCount < 3 && i%17 == 0 {
 			t := chalCN[cnCount%len(chalCN)]
 			title = t.title
@@ -273,7 +383,6 @@ func createChallenges(db *sql.DB) []string {
 			flag = t.flag
 			cnCount++
 		} else {
-			// 从对应分类的模板中按索引选取
 			templates := chalTemplates[cat]
 			idx := chalIdx[cat]
 			t := templates[idx%len(templates)]
@@ -282,150 +391,60 @@ func createChallenges(db *sql.DB) []string {
 			flag = t.flag
 			chalIdx[cat]++
 		}
-
-		_, err := db.Exec(`INSERT INTO challenges
-			(res_id, title, category, description, score, flag, is_enabled)
-			VALUES (?, ?, ?, ?, ?, ?, 1)`,
-			rid, title, cat, desc, sc, flag,
-		)
-		must(err, "create challenge %d", i)
-		ids[i] = rid
+		id := apiCreateChallenge(adminToken, title, cat, desc, sc, flag)
+		chalIDs[i] = id
+		chalFlags[id] = flag
 	}
-	return ids
-}
+	log.Printf("created %d challenges", len(chalIDs))
 
-// createComp 创建单个比赛。
-// 根据 idx 决定比赛时间是过去（0-4）、当前（5-9）还是未来（10-14）。
-// 返回比赛的 res_id、开始时间和结束时间。
-func createComp(db *sql.DB, idx int, now time.Time) (string, time.Time, time.Time) {
-	rid := uuid.Next()
+	// 创建 15 个比赛
+	now := time.Now()
+	for i := 0; i < numComps; i++ {
+		var start, end time.Time
+		switch {
+		case i < 5:
+			start = now.AddDate(0, 0, -(i+1)*7)
+			end = start.Add(48 * time.Hour)
+		case i < 10:
+			start = now.Add(time.Duration(i-7) * 24 * time.Hour)
+			end = start.Add(72 * time.Hour)
+		default:
+			start = now.AddDate(0, 0, (i-9)*7)
+			end = start.Add(48 * time.Hour)
+		}
 
-	var start, end time.Time
-	switch {
-	case idx < 5: // 过去的比赛：从现在往前推 (idx+1) 周，持续 48 小时
-		start = now.AddDate(0, 0, -(idx+1)*7)
-		end = start.Add(48 * time.Hour)
-	case idx < 10: // 当前进行中的比赛：前后浮动，持续 72 小时
-		start = now.Add(time.Duration(idx-7) * 24 * time.Hour)
-		end = start.Add(72 * time.Hour)
-	default: // 未来的比赛：从现在往后推 (idx-9) 周，持续 48 小时
-		start = now.AddDate(0, 0, (idx-9)*7)
-		end = start.Add(48 * time.Hour)
-	}
+		compID := apiCreateCompetition(adminToken,
+			compTitles[i%len(compTitles)],
+			compDescs[i%len(compDescs)],
+			start, end)
 
-	_, err := db.Exec(`INSERT INTO competitions
-		(res_id, title, description, start_time, end_time, is_active)
-		VALUES (?, ?, ?, ?, ?, 1)`,
-		rid,
-		compTitles[idx%len(compTitles)],
-		compDescs[idx%len(compDescs)],
-		start, end,
-	)
-	must(err, "create competition %d", idx)
-	return rid, start, end
-}
+		picked := pickN(rng, chalIDs, chalsPerComp)
+		for _, cid := range picked {
+			apiAddChallengeToComp(adminToken, compID, cid)
+		}
+		apiStartComp(adminToken, compID)
+		log.Printf("competition %02d  id=%s  started", i+1, compID)
 
-// pickN 从 ID 列表中随机选取 n 个不重复的元素。
-// 先复制列表，再随机洗牌，取前 n 个。
-func pickN(rng *rand.Rand, ids []string, n int) []string {
-	s := make([]string, len(ids))
-	copy(s, ids)
-	rng.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] })
-	return s[:n]
-}
-
-// assignChals 将选中的题目分配到比赛中。
-// 为每个分配创建一条 competition_challenges 关联记录。
-func assignChals(db *sql.DB, compID string, chalIDs []string) {
-	for _, cid := range chalIDs {
-		rid := uuid.Next()
-		_, err := db.Exec(`INSERT INTO competition_challenges
-			(res_id, competition_id, challenge_id) VALUES (?, ?, ?)`,
-			rid, compID, cid)
-		must(err, "assign challenge to comp")
-	}
-}
-
-// genSubmissionsConfig 是生成提交记录的配置参数。
-type genSubmissionsConfig struct {
-	DB        *sql.DB
-	RNG       *rand.Rand
-	CompID    string
-	ChalIDs   []string
-	CompStart time.Time
-	CompEnd   time.Time
-}
-
-// genSubmissions 为比赛中的所有用户生成提交记录。
-// 根据预定义的 solveCounts 决定每个用户解对多少题。
-// 高排名用户更早开始解题（用于 last_solve_time 排名并列判定）。
-// 30% 概率在正确提交前生成一个错误尝试。
-func genSubmissions(cfg *genSubmissionsConfig) {
-	dur := cfg.CompEnd.Sub(cfg.CompStart)
-
-	for u := 0; u < usersPerComp; u++ {
-		userID := fmt.Sprintf("player_%03d", u+1)
-		nCorrect := solveCounts[u]
-
-		// 随机选择该用户解对的题目
-		picked := make([]string, len(cfg.ChalIDs))
-		copy(picked, cfg.ChalIDs)
-		cfg.RNG.Shuffle(len(picked), func(i, j int) { picked[i], picked[j] = picked[j], picked[i] })
-
-		correct := picked[:nCorrect] // 解对的题目
-		rest := picked[nCorrect:]    // 未解对的题目
-
-		// 高排名用户更早开始解题（影响排行榜 last_solve_time 排序）
-		userBase := cfg.CompStart.Add(dur / time.Duration(usersPerComp+1) * time.Duration(u))
-		step := (cfg.CompEnd.Sub(userBase)) / time.Duration(nCorrect+1)
-
-		// 生成正确提交记录
-		for j, cid := range correct {
-			t := userBase.Add(step * time.Duration(j+1))
-			// 30% 概率在正确提交前有一次错误尝试
-			if cfg.RNG.Float64() < 0.3 {
-				insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: cid, CompID: cfg.CompID, Correct: false, Time: t.Add(-2 * time.Minute)})
+		// 并发启动所有用户提交任务
+		var wg sync.WaitGroup
+		for u := 0; u < usersPerComp; u++ {
+			wg.Add(1)
+			job := &userJob{
+				CompIdx: i,
+				UserIdx: u,
+				CompID:  compID,
+				ChalIDs: picked,
+				Flags:   chalFlags,
+				RNG:     rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(u))),
 			}
-			insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: cid, CompID: cfg.CompID, Correct: true, Time: t})
+			go job.run(&wg)
 		}
+		wg.Wait()
 
-		// 在未解对的题目上生成 0-2 次错误尝试
-		for j := 0; j < cfg.RNG.Intn(3) && j < len(rest); j++ {
-			t := cfg.CompStart.Add(dur / time.Duration(u+2) * time.Duration(j+1))
-			insertSub(&insertSubRequest{DB: cfg.DB, UserID: userID, ChalID: rest[j], CompID: cfg.CompID, Correct: false, Time: t})
-		}
+		apiEndComp(adminToken, compID)
+		log.Printf("competition %02d  id=%s  %s ~ %s  done", i+1, compID,
+			start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04"))
 	}
-}
 
-// insertSubRequest 是插入提交记录的参数。
-type insertSubRequest struct {
-	DB      *sql.DB
-	UserID  string
-	ChalID  string
-	CompID  string
-	Correct bool
-	Time    time.Time
-}
-
-// insertSub 插入一条提交记录。
-// 参数 correct 为 true 时表示正确提交，flag 记录为 "flag{correct}"；
-// 否则记录为错误提交，flag 记录为 "flag{wrong_attempt}"。
-func insertSub(req *insertSubRequest) {
-	flag := "flag{wrong_attempt}"
-	if req.Correct {
-		flag = "flag{correct}"
-	}
-	rid := uuid.Next()
-	_, err := req.DB.Exec(`INSERT INTO submissions
-		(res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		rid, req.UserID, req.ChalID, req.CompID, flag, req.Correct, req.Time)
-	must(err, "insert submission")
-}
-
-// must 是简单的错误检查辅助函数，如果错误非 nil 则 log.Fatalf 退出程序。
-func must(err error, msg string, args ...any) {
-	if err != nil {
-		log.Fatalf(msg+": %v", append(args, err)...)
-	}
+	log.Println("seed complete!")
 }
