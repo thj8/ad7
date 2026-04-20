@@ -90,3 +90,26 @@ CREATE TABLE IF NOT EXISTS topthree_records (
     UNIQUE INDEX idx_comp_chal_rank (competition_id, challenge_id, ranking),
     INDEX idx_comp_chal (competition_id, challenge_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每道题前三名记录表';
+
+CREATE TABLE IF NOT EXISTS teams (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    res_id      VARCHAR(32)   NOT NULL UNIQUE,
+    name        VARCHAR(255)  NOT NULL UNIQUE,
+    description VARCHAR(4096) NOT NULL DEFAULT '',
+    is_deleted  TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    res_id        VARCHAR(32)   NOT NULL UNIQUE,
+    username      VARCHAR(255)  NOT NULL UNIQUE,
+    password_hash VARCHAR(255)  NOT NULL,
+    role          VARCHAR(64)   NOT NULL DEFAULT 'member',
+    team_id       VARCHAR(32)   DEFAULT NULL,
+    is_deleted    TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_team (team_id)
+);
