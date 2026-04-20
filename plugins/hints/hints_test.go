@@ -57,7 +57,7 @@ func TestHintsCRUD(t *testing.T) {
 		t.Fatalf("expected 2 hints, got %d", len(hints))
 	}
 	first := hints[0].(map[string]any)
-	hintID := first["res_id"].(string)
+	hintID := first["id"].(string)
 
 	// --- Update hint: make invisible ---
 	resp = testutil.DoRequest(t, env.Server.URL, "PUT",

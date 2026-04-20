@@ -114,7 +114,7 @@ func GetUserScores(ctx context.Context, db DBTX, compID string) (map[string]int,
 func GetCompSubmitStats(ctx context.Context, db DBTX, compID string) (int, int, error) {
 	var total, correct int
 	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END), 0)
 		FROM submissions WHERE competition_id = ? AND is_deleted = 0
 	`, compID).Scan(&total, &correct)
 	return total, correct, err

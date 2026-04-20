@@ -2,6 +2,7 @@ package topthree_test
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -15,6 +16,22 @@ func TestMain(m *testing.M) {
 	env = testutil.NewTestEnv(m)
 	defer env.Close()
 	os.Exit(m.Run())
+}
+
+func getTopThree(t *testing.T, compID, token string) map[string]any {
+	t.Helper()
+	resp := testutil.DoRequest(t, env.Server.URL, "GET",
+		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", token)
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("topthree status %d: %s", resp.StatusCode, raw)
+	}
+	body := testutil.DecodeJSON(t, resp)
+	if _, ok := body["challenges"]; !ok {
+		t.Fatalf("no challenges key: %v", body)
+	}
+	return body
 }
 
 func TestTopThreeEventDriven(t *testing.T) {
@@ -42,43 +59,37 @@ func TestTopThreeEventDriven(t *testing.T) {
 		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok).Body.Close()
 
 	// Empty topthree
-	resp = testutil.DoRequest(t, env.Server.URL, "GET",
-		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", user1Tok)
-	testutil.AssertStatus(t, resp, 200)
-	body := testutil.DecodeJSON(t, resp)
+	body := getTopThree(t, compID, user1Tok)
 	challenges := body["challenges"].([]any)
 	if len(challenges) != 1 {
 		t.Fatalf("expected 1 challenge, got %d", len(challenges))
 	}
 	first := challenges[0].(map[string]any)
-	tt := first["top_three"].([]any)
+	ttRaw := first["top_three"]
+	var tt []any
+	if ttRaw != nil {
+		tt = ttRaw.([]any)
+	}
 	if len(tt) != 0 {
 		t.Fatalf("expected 0 top_three entries, got %d", len(tt))
 	}
 
-	// User1 solves → should be rank 1 (一血)
+	// User1 solves → should be rank 1
 	resp = testutil.DoRequest(t, env.Server.URL, "POST",
 		fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
 		`{"flag":"flag{tt1}"}`, user1Tok)
 	testutil.AssertStatus(t, resp, 200)
 	resp.Body.Close()
-
-	// Brief pause for async event processing
 	time.Sleep(200 * time.Millisecond)
 
-	resp = testutil.DoRequest(t, env.Server.URL, "GET",
-		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", user1Tok)
-	testutil.AssertStatus(t, resp, 200)
-	body = testutil.DecodeJSON(t, resp)
+	body = getTopThree(t, compID, user1Tok)
 	challenges = body["challenges"].([]any)
-	first = challenges[0].(map[string]any)
-	tt = first["top_three"].([]any)
+	tt = challenges[0].(map[string]any)["top_three"].([]any)
 	if len(tt) != 1 {
 		t.Fatalf("expected 1 top_three entry, got %d", len(tt))
 	}
-	entry1 := tt[0].(map[string]any)
-	if entry1["user_id"] != "user1" {
-		t.Fatalf("expected user1, got %v", entry1["user_id"])
+	if tt[0].(map[string]any)["user_id"] != "user1" {
+		t.Fatalf("expected user1, got %v", tt[0].(map[string]any)["user_id"])
 	}
 
 	// User2 solves → rank 2
@@ -94,30 +105,20 @@ func TestTopThreeEventDriven(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify 3 entries
-	resp = testutil.DoRequest(t, env.Server.URL, "GET",
-		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", user1Tok)
-	testutil.AssertStatus(t, resp, 200)
-	body = testutil.DecodeJSON(t, resp)
-	challenges = body["challenges"].([]any)
-	first = challenges[0].(map[string]any)
-	tt = first["top_three"].([]any)
+	body = getTopThree(t, compID, user1Tok)
+	tt = body["challenges"].([]any)[0].(map[string]any)["top_three"].([]any)
 	if len(tt) != 3 {
 		t.Fatalf("expected 3 top_three entries, got %d", len(tt))
 	}
 
-	// User4 solves → should NOT enter top three (already full, all earlier)
+	// User4 solves → should NOT enter top three
 	testutil.DoRequest(t, env.Server.URL, "POST",
 		fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID),
 		`{"flag":"flag{tt1}"}`, user4Tok).Body.Close()
 	time.Sleep(200 * time.Millisecond)
 
-	resp = testutil.DoRequest(t, env.Server.URL, "GET",
-		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", user1Tok)
-	testutil.AssertStatus(t, resp, 200)
-	body = testutil.DecodeJSON(t, resp)
-	challenges = body["challenges"].([]any)
-	first = challenges[0].(map[string]any)
-	tt = first["top_three"].([]any)
+	body = getTopThree(t, compID, user1Tok)
+	tt = body["challenges"].([]any)[0].(map[string]any)["top_three"].([]any)
 	if len(tt) != 3 {
 		t.Fatalf("expected still 3 entries after user4, got %d", len(tt))
 	}
@@ -175,13 +176,8 @@ func TestTopThreeDuplicateUser(t *testing.T) {
 		`{"flag":"flag{dup}"}`, user1Tok).Body.Close()
 	time.Sleep(200 * time.Millisecond)
 
-	resp = testutil.DoRequest(t, env.Server.URL, "GET",
-		fmt.Sprintf("/api/v1/topthree/competitions/%s", compID), "", user1Tok)
-	testutil.AssertStatus(t, resp, 200)
-	body := testutil.DecodeJSON(t, resp)
-	challenges := body["challenges"].([]any)
-	first := challenges[0].(map[string]any)
-	tt := first["top_three"].([]any)
+	body := getTopThree(t, compID, user1Tok)
+	tt := body["challenges"].([]any)[0].(map[string]any)["top_three"].([]any)
 	if len(tt) != 1 {
 		t.Fatalf("expected 1 entry (no duplicate), got %d", len(tt))
 	}
