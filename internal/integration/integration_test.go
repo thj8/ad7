@@ -550,3 +550,543 @@ func TestCompetitionAutoStatus(t *testing.T) {
 		}
 	}
 }
+
+// --- Helper ---
+
+// registerUserViaAuth registers a user via the auth server and returns (userID, token).
+func registerUserViaAuth(t *testing.T, username, password, role string) (string, string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"username":"%s","password":"%s"}`, username, password)
+	if role != "" {
+		body = fmt.Sprintf(`{"username":"%s","password":"%s","role":"%s"}`, username, password, role)
+	}
+	resp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/register", body, "")
+	if resp.StatusCode == 409 {
+		// Already registered, login instead
+		resp.Body.Close()
+		resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/login",
+			fmt.Sprintf(`{"username":"%s","password":"%s"}`, username, password), "")
+		testutil.AssertStatus(t, resp, 200)
+		m := testutil.DecodeJSON(t, resp)
+		tok, _ := m["token"].(string)
+		// Need user_id - get it from the token via verify
+		vResp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/verify", "", tok)
+		testutil.AssertStatus(t, vResp, 200)
+		vBody := testutil.DecodeJSON(t, vResp)
+		uid, _ := vBody["user_id"].(string)
+		return uid, tok
+	}
+	testutil.AssertStatus(t, resp, 201)
+	m := testutil.DecodeJSON(t, resp)
+	uid, _ := m["id"].(string)
+
+	// Login to get token
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/login",
+		fmt.Sprintf(`{"username":"%s","password":"%s"}`, username, password), "")
+	testutil.AssertStatus(t, resp, 200)
+	m = testutil.DecodeJSON(t, resp)
+	tok, _ := m["token"].(string)
+	return uid, tok
+}
+
+// --- Auth Team Tests ---
+
+func TestTeamCRUD(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+
+	// Create team
+	resp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/admin/teams",
+		`{"name":"Test Team","description":"A test team"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	team := testutil.DecodeJSON(t, resp)
+	teamID := testutil.GetID(t, team)
+
+	// List teams
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", "/api/v1/teams", "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	list := testutil.DecodeJSON(t, resp)
+	teams := list["teams"].([]any)
+	if len(teams) == 0 {
+		t.Fatal("expected at least one team")
+	}
+
+	// Get team
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", "/api/v1/teams/"+teamID, "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	got := testutil.DecodeJSON(t, resp)
+	if got["name"] != "Test Team" {
+		t.Fatalf("expected name=Test Team, got %v", got["name"])
+	}
+
+	// Update team
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "PUT", "/api/v1/admin/teams/"+teamID,
+		`{"name":"Updated Team","description":"Updated"}`, adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify update
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", "/api/v1/teams/"+teamID, "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	got = testutil.DecodeJSON(t, resp)
+	if got["name"] != "Updated Team" {
+		t.Fatalf("expected name=Updated Team, got %v", got["name"])
+	}
+
+	// Delete team
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "DELETE", "/api/v1/admin/teams/"+teamID, "", adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify deleted
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", "/api/v1/teams/"+teamID, "", adminTok)
+	testutil.AssertStatus(t, resp, 404)
+}
+
+func TestTeamMembers(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+
+	// Create team
+	resp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/admin/teams",
+		`{"name":"Member Team","description":"Test members"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	teamID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Register users
+	user1ID, _ := registerUserViaAuth(t, "tmuser1", "pass123", "")
+	user2ID, _ := registerUserViaAuth(t, "tmuser2", "pass123", "")
+
+	// Add member (returns 200)
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"member"}`, user1ID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Add another member
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"member"}`, user2ID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// List members
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", fmt.Sprintf("/api/v1/teams/%s/members", teamID), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	mBody := testutil.DecodeJSON(t, resp)
+	members := mBody["members"].([]any)
+	if len(members) < 2 {
+		t.Fatalf("expected at least 2 members, got %d", len(members))
+	}
+
+	// Duplicate add → 409
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"member"}`, user2ID), adminTok)
+	testutil.AssertStatus(t, resp, 409)
+
+	// Remove member
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "DELETE", fmt.Sprintf("/api/v1/admin/teams/%s/members/%s", teamID, user2ID), "", adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify removed
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", fmt.Sprintf("/api/v1/teams/%s/members", teamID), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	mBody = testutil.DecodeJSON(t, resp)
+	members = mBody["members"].([]any)
+	if len(members) != 1 {
+		t.Fatalf("expected 1 member after removal, got %d", len(members))
+	}
+}
+
+func TestTeamSetCaptain(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+
+	// Create team
+	resp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/admin/teams",
+		`{"name":"Captain Team","description":"Test captain"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	teamID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Register user and add as member
+	userID, _ := registerUserViaAuth(t, "capuser1", "pass123", "")
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"member"}`, userID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Set as captain
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "PUT", fmt.Sprintf("/api/v1/admin/teams/%s/captain", teamID),
+		fmt.Sprintf(`{"user_id":"%s"}`, userID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Verify captain in member list
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", fmt.Sprintf("/api/v1/teams/%s/members", teamID), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	mBody := testutil.DecodeJSON(t, resp)
+	members := mBody["members"].([]any)
+	for _, m := range members {
+		mm := m.(map[string]any)
+		if mm["user_id"] == userID {
+			if mm["role"] != "captain" {
+				t.Fatalf("expected role=captain, got %v", mm["role"])
+			}
+			return
+		}
+	}
+	t.Fatal("user not found in member list")
+}
+
+func TestTeamTransferCaptain(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+
+	// Create team
+	resp := testutil.DoRequest(t, env.AuthServer.URL, "POST", "/api/v1/admin/teams",
+		`{"name":"Transfer Team","description":"Test transfer"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	teamID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Register two users (captain gets admin role since transfer-captain is under /admin routes)
+	captainID, _ := registerUserViaAuth(t, "oldcap", "pass123", "admin")
+	newCapID, _ := registerUserViaAuth(t, "newcap", "pass123", "")
+
+	// captainID registered with admin role; make a token that matches
+	captainAdminTok := testutil.MakeToken(captainID, "admin")
+
+	// Add both as members, set captain to oldcap
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"captain"}`, captainID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/members", teamID),
+		fmt.Sprintf(`{"user_id":"%s","role":"member"}`, newCapID), adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Transfer captain from oldcap to newcap (admin route, captain needs admin role)
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "POST", fmt.Sprintf("/api/v1/admin/teams/%s/transfer-captain", teamID),
+		fmt.Sprintf(`{"to_user_id":"%s"}`, newCapID), captainAdminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Verify new captain
+	resp = testutil.DoRequest(t, env.AuthServer.URL, "GET", fmt.Sprintf("/api/v1/teams/%s/members", teamID), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	mBody := testutil.DecodeJSON(t, resp)
+	members := mBody["members"].([]any)
+	for _, m := range members {
+		mm := m.(map[string]any)
+		if mm["user_id"] == newCapID {
+			if mm["role"] != "captain" {
+				t.Fatalf("expected new captain role=captain, got %v", mm["role"])
+			}
+		}
+	}
+}
+
+// --- Admin List All Competitions ---
+
+func TestAdminListAllCompetitions(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	// Create two competitions
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Comp A","description":"A","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Comp B","description":"B","start_time":"2026-06-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Admin list all
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", "/api/v1/admin/competitions", "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	list := testutil.DecodeJSON(t, resp)
+	comps := list["competitions"].([]any)
+	if len(comps) < 2 {
+		t.Fatalf("expected at least 2 competitions, got %d", len(comps))
+	}
+
+	// Non-admin cannot access
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", "/api/v1/admin/competitions", "", userTok)
+	testutil.AssertStatus(t, resp, 403)
+}
+
+// --- Notification Plugin Tests ---
+
+func TestNotificationCRUD(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	// Create competition
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Comp Notif","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// List notifications (empty)
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/notifications", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	nBody := testutil.DecodeJSON(t, resp)
+	notifs := nBody["notifications"].([]any)
+	if len(notifs) != 0 {
+		t.Fatalf("expected 0 notifications, got %d", len(notifs))
+	}
+
+	// Create notification
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/notifications", compID),
+		`{"title":"Test Notif","message":"Hello World"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// List notifications
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/notifications", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	nBody = testutil.DecodeJSON(t, resp)
+	notifs = nBody["notifications"].([]any)
+	if len(notifs) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifs))
+	}
+	n := notifs[0].(map[string]any)
+	notiID, _ := n["id"].(string)
+	if notiID == "" {
+		t.Fatal("expected id in notification")
+	}
+
+	// Update notification
+	resp = testutil.DoRequest(t, env.Server.URL, "PUT", "/api/v1/admin/notifications/"+notiID,
+		`{"title":"Updated Title"}`, adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify update
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/notifications", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	nBody = testutil.DecodeJSON(t, resp)
+	notifs = nBody["notifications"].([]any)
+	n = notifs[0].(map[string]any)
+	if n["title"] != "Updated Title" {
+		t.Fatalf("expected title=Updated Title, got %v", n["title"])
+	}
+
+	// Delete notification
+	resp = testutil.DoRequest(t, env.Server.URL, "DELETE", "/api/v1/admin/notifications/"+notiID, "", adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify deleted
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/notifications", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	nBody = testutil.DecodeJSON(t, resp)
+	notifs = nBody["notifications"].([]any)
+	if len(notifs) != 0 {
+		t.Fatalf("expected 0 notifications after delete, got %d", len(notifs))
+	}
+}
+
+// --- Hints Plugin Tests ---
+
+func TestHintsCRUD(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	// Create challenge
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/challenges",
+		`{"title":"Hint Chal","description":"D","score":100,"flag":"flag{hint}"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	chalID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// List hints (empty)
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/challenges/%s/hints", chalID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	hBody := testutil.DecodeJSON(t, resp)
+	hints := hBody["hints"].([]any)
+	if len(hints) != 0 {
+		t.Fatalf("expected 0 hints, got %d", len(hints))
+	}
+
+	// Create hint
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/challenges/%s/hints", chalID),
+		`{"content":"Try looking at the source"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// List hints
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/challenges/%s/hints", chalID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	hBody = testutil.DecodeJSON(t, resp)
+	hints = hBody["hints"].([]any)
+	if len(hints) != 1 {
+		t.Fatalf("expected 1 hint, got %d", len(hints))
+	}
+	h := hints[0].(map[string]any)
+	hintID, _ := h["id"].(string)
+	if hintID == "" {
+		t.Fatal("expected id in hint")
+	}
+
+	// Update hint
+	resp = testutil.DoRequest(t, env.Server.URL, "PUT", "/api/v1/admin/hints/"+hintID,
+		`{"content":"Updated hint content"}`, adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// Verify update
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/challenges/%s/hints", chalID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	hBody = testutil.DecodeJSON(t, resp)
+	hints = hBody["hints"].([]any)
+	h = hints[0].(map[string]any)
+	if h["content"] != "Updated hint content" {
+		t.Fatalf("expected content=Updated hint content, got %v", h["content"])
+	}
+
+	// Hide hint (set is_visible=false)
+	resp = testutil.DoRequest(t, env.Server.URL, "PUT", "/api/v1/admin/hints/"+hintID,
+		`{"is_visible":false}`, adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+
+	// User should not see hidden hint
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/challenges/%s/hints", chalID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	hBody = testutil.DecodeJSON(t, resp)
+	hints = hBody["hints"].([]any)
+	if len(hints) != 0 {
+		t.Fatalf("expected 0 visible hints after hiding, got %d", len(hints))
+	}
+
+	// Delete hint
+	resp = testutil.DoRequest(t, env.Server.URL, "DELETE", "/api/v1/admin/hints/"+hintID, "", adminTok)
+	testutil.AssertStatus(t, resp, 204)
+	resp.Body.Close()
+}
+
+// --- Analytics Plugin Tests ---
+
+func TestAnalyticsOverview(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	// Setup: create competition + challenge + add to comp
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Analytics Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/challenges",
+		`{"title":"AChal","description":"D","score":100,"flag":"flag{analytics}"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	chalID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Submit correct flag
+	submitPath := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath, `{"flag":"flag{analytics}"}`, userTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Get overview
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/analytics/overview", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	ov := testutil.DecodeJSON(t, resp)
+	if ov["total_challenges"] == nil || ov["correct_submissions"] == nil {
+		t.Fatalf("expected overview fields, got %v", ov)
+	}
+}
+
+func TestAnalyticsCategories(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Cat Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Get categories (empty)
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/analytics/categories", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	cat := testutil.DecodeJSON(t, resp)
+	cats, ok := cat["categories"].([]any)
+	if !ok {
+		t.Fatalf("expected categories array, got %T", cat["categories"])
+	}
+	_ = cats // may be empty
+}
+
+func TestAnalyticsUsers(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"User Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Get user stats
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/analytics/users", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	uBody := testutil.DecodeJSON(t, resp)
+	users, ok := uBody["users"].([]any)
+	if !ok {
+		t.Fatalf("expected users array, got %T", uBody["users"])
+	}
+	_ = users
+}
+
+func TestAnalyticsChallenges(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Chal Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Create challenge and add to comp
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/challenges",
+		`{"title":"StatsChal","description":"D","score":150,"flag":"flag{stats}"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	chalID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Submit correct flag
+	submitPath := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath, `{"flag":"flag{stats}"}`, userTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Get challenge stats
+	resp = testutil.DoRequest(t, env.Server.URL, "GET", fmt.Sprintf("/api/v1/competitions/%s/analytics/challenges", compID), "", userTok)
+	testutil.AssertStatus(t, resp, 200)
+	cBody := testutil.DecodeJSON(t, resp)
+	chals, ok := cBody["challenges"].([]any)
+	if !ok {
+		t.Fatalf("expected challenges array, got %T", cBody["challenges"])
+	}
+	if len(chals) != 1 {
+		t.Fatalf("expected 1 challenge stat, got %d", len(chals))
+	}
+}

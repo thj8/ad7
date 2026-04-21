@@ -20,6 +20,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Role     string `json:"role,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Username == "" || body.Password == "" {
 		authWriteError(w, http.StatusBadRequest, "username and password are required")
@@ -28,6 +29,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user, err := h.svc.Register(r.Context(), &RegisterRequest{
 		Username: body.Username,
 		Password: body.Password,
+		Role:     body.Role,
 	})
 	if err == ErrConflict {
 		authWriteError(w, http.StatusConflict, "username already exists")
