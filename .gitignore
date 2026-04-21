@@ -5,3 +5,6 @@ server
 .claude/settings.local.json
 .worktrees/
 auth-server
+.env
+sql/migrations/*.local.sql
+

@@ -89,7 +89,7 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	authStore := auth.NewAuthStore(st.DB())
 	authSvc := auth.NewAuthService(authStore, TestSecret, AdminRole)
 	verifyH := auth.NewVerifyHandler(authSvc)
-	authDeps := auth.RouteDeps{AuthH: auth.NewAuthHandler(authSvc), TeamH: auth.NewTeamHandler(auth.NewTeamService(authStore, authStore))}
+	authDeps := auth.RouteDeps{AuthH: auth.NewAuthHandler(authSvc), TeamH: auth.NewTeamHandler(auth.NewTeamService(authStore, authStore, authStore))}
 	authR := chi.NewRouter()
 	authR.Use(chimw.Recoverer)
 	authR.Route("/api/v1", func(r chi.Router) {
@@ -176,6 +176,7 @@ func Cleanup(t *testing.T, db *sql.DB) {
 	db.Exec("DELETE FROM submissions")
 	db.Exec("DELETE FROM competitions")
 	db.Exec("DELETE FROM challenges")
+	db.Exec("DELETE FROM team_members")
 	db.Exec("DELETE FROM users")
 	db.Exec("DELETE FROM teams")
 }

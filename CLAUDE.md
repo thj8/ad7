@@ -45,6 +45,9 @@ go test ./internal/integration/... -v -run TestSubmitFlag -count=1
 
 # 应用数据库架构
 mysql -h <host> -u root -p<password> ctf < sql/schema.sql
+
+# 运行迁移脚本（从 users.team_id 迁移到 team_members）
+mysql -h <host> -u root -p<password> ctf < sql/migrations/001_team_members.sql
 ```
 
 ## 架构
@@ -61,8 +64,8 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - `internal/config/` — YAML 配置（`server.port`、`db.*`、`auth.url`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
 - `internal/uuid/` — UUID v4 生成器（32字符十六进制，无连字符）
 - `internal/logger/` — 基于 `log/slog` 的双输出日志（stdout + 可选文件），支持级别配置
-- `internal/auth/` — 认证模块：用户注册/登录、JWT token 签发和验证、队伍 CRUD + 成员管理。独立运行在 `cmd/auth-server/` 中，通过 HTTP 接口提供服务
-- `cmd/auth-server/` — 独立认证服务器入口，端口 8081。提供 `/api/v1/register`、`/api/v1/login`、`/api/v1/verify`、`/api/v1/teams/*` 等端点
+- `internal/auth/` — 认证模块：用户注册/登录、JWT token 签发和验证、队伍 CRUD + 成员管理。独立运行在 `cmd/auth-server/` 中，通过 HTTP 接口提供服务。使用 `team_members` 关联表管理用户-队伍关系，支持 `captain`/`member` 角色
+- `cmd/auth-server/` — 独立认证服务器入口，端口 8081。提供 `/api/v1/register`、`/api/v1/login`、`/api/v1/verify`、`/api/v1/teams/*` 等端点。新增端点：`PUT /api/v1/admin/teams/{id}/captain`、`POST /api/v1/admin/teams/{id}/transfer-captain`
 
 **中间件：**
 - `internal/middleware/auth.go` — 认证中间件（`Authenticate`）通过 HTTP 调用 auth 服务的 `POST /api/v1/verify` 验证 JWT token，从响应提取 `user_id` 和 `role` 注入 context。`RequireAdmin` 检查 context 中的 role。`NewAuth(authURL, adminRole)` 接收 auth 服务地址而非 JWT secret
@@ -110,3 +113,4 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 - **函数参数**: 所有函数参数不能多于4个，采用结构体封装
 - **输入验证**: 字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）
 - **查询数据库**: 插件不允许直接查询数据库，仅可以查自己插件的数据库, 不能写 SQL 查主表，必须用 pluginutil 中的共享查询函数
+- **用户-队伍关系**: 使用 `team_members` 关联表替代 `users.team_id` 列，支持多队预备（当前通过服务层约束单队）。支持队伍内部角色：`captain`（队长）和 `member`（成员）。每个队伍有且仅有一个队长，队长在有其他成员时不能被移除，必须先转移队长权限
