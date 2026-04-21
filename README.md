@@ -22,7 +22,8 @@ go mod download
 
 # 配置
 cp config.yaml.example config.yaml
-# 编辑 config.yaml，填入你的 MySQL 和 JWT 设置
+cp cmd/auth-server/config.yaml.example cmd/auth-server/config.yaml
+# 编辑两个 config.yaml，填入你的 MySQL 和 JWT 设置
 
 # 应用数据库架构
 mysql -u root -p your_db < sql/schema.sql
@@ -30,7 +31,11 @@ mysql -u root -p your_db < sql/schema.sql
 # 生成测试数据（可选）
 go run ./cmd/seed/
 
-# 运行服务器
+# 运行服务器（必须按顺序启动）
+# 1. 先启动认证服务器（端口 8081）
+go run ./cmd/auth-server -config cmd/auth-server/config.yaml
+
+# 2. 再启动 CTF 服务器（端口 8080）
 go run ./cmd/server -config config.yaml
 
 # 尝试测试脚本
@@ -45,6 +50,26 @@ go run ./cmd/server -config config.yaml
 # 或一键跑全部
 ./scripts/demo.sh
 ```
+
+## 架构说明
+
+### 双服务架构
+
+项目使用独立的认证服务器和 CTF 服务器：
+
+```
+认证服务器 (端口 8081)
+├── /api/v1/register    # 用户注册
+├── /api/v1/login       # 用户登录
+├── /api/v1/verify      # Token 验证（供 CTF 服务器调用）
+└── /api/v1/teams/*     # 队伍管理
+
+CTF 服务器 (端口 8080)
+├── 所有 CTF 业务 API
+└── 通过 POST /api/v1/verify 调用认证服务器验证 Token
+```
+
+认证服务器和 CTF 服务器共享同一个 MySQL 数据库。
 
 ## API 概览
 

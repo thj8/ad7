@@ -57,19 +57,19 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		auth.RegisterPublicRoutes(r, authDeps)
 		r.Post("/verify", verifyH.Verify)
-	})
 
-	// 需要认证的队伍路由
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(authMW.Authenticate)
-		auth.RegisterTeamRoutes(r, authDeps)
-	})
+		// 需要认证的队伍路由
+		r.Group(func(r chi.Router) {
+			r.Use(authMW.Authenticate)
+			auth.RegisterTeamRoutes(r, authDeps)
+		})
 
-	// 管理员队伍路由
-	r.Route("/api/v1/admin", func(r chi.Router) {
-		r.Use(authMW.Authenticate)
-		r.Use(authMW.RequireAdmin)
-		auth.RegisterAdminTeamRoutes(r, authDeps)
+		// 管理员队伍路由
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(authMW.Authenticate)
+			r.Use(authMW.RequireAdmin)
+			auth.RegisterAdminTeamRoutes(r, authDeps)
+		})
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

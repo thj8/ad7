@@ -90,6 +90,8 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	authSvc := auth.NewAuthService(authStore, TestSecret, AdminRole)
 	verifyH := auth.NewVerifyHandler(authSvc)
 	authDeps := auth.RouteDeps{AuthH: auth.NewAuthHandler(authSvc), TeamH: auth.NewTeamHandler(auth.NewTeamService(authStore, authStore, authStore))}
+
+	// Phase 1: create server with only public routes to get the URL
 	authR := chi.NewRouter()
 	authR.Use(chimw.Recoverer)
 	authR.Route("/api/v1", func(r chi.Router) {
@@ -97,6 +99,26 @@ func NewTestEnv(m *testing.M) *TestEnv {
 		r.Post("/verify", verifyH.Verify)
 	})
 	authServer := httptest.NewServer(authR)
+
+	// Phase 2: create middleware pointing to this server, rebuild with protected routes
+	authMW := middleware.NewAuth(authServer.URL, AdminRole)
+	authDeps.Auth = authMW
+	fullR := chi.NewRouter()
+	fullR.Use(chimw.Recoverer)
+	fullR.Route("/api/v1", func(r chi.Router) {
+		auth.RegisterPublicRoutes(r, authDeps)
+		r.Post("/verify", verifyH.Verify)
+		r.Group(func(r chi.Router) {
+			r.Use(authMW.Authenticate)
+			auth.RegisterTeamRoutes(r, authDeps)
+		})
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(authMW.Authenticate)
+			r.Use(authMW.RequireAdmin)
+			auth.RegisterAdminTeamRoutes(r, authDeps)
+		})
+	})
+	authServer.Config.Handler = fullR
 
 	auth := middleware.NewAuth(authServer.URL, AdminRole)
 	challengeSvc := service.NewChallengeService(st)

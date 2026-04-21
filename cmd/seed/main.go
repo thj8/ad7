@@ -224,7 +224,16 @@ func postJSON(url string, body any, token string) map[string]any {
 // registerAndLogin 注册用户并返回 JWT token。
 // 如果用户已存在（409），直接登录。
 func registerAndLogin(username, password string) string {
-	b, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	return registerAndLoginWithRole(username, password, "")
+}
+
+// registerAndLoginWithRole 注册指定角色的用户并返回 JWT token。
+func registerAndLoginWithRole(username, password, role string) string {
+	payload := map[string]string{"username": username, "password": password}
+	if role != "" {
+		payload["role"] = role
+	}
+	b, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", authURL()+"/api/v1/register", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -287,11 +296,34 @@ func apiAddChallengeToComp(token, compID, chalID string) {
 }
 
 func apiStartComp(token, compID string) {
-	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", nil, token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", token)
 }
 
 func apiEndComp(token, compID string) {
-	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", nil, token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", token)
+}
+
+// postJSONIgnore409 发送 POST 请求，容忍 409（已处于目标状态）。
+func postJSONIgnore409(url string, token string) {
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		log.Fatalf("new request %s: %v", url, err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatalf("post %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 409 {
+		return // 已处于目标状态，忽略
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(resp.Body)
+		log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
+	}
 }
 
 func apiSubmitFlag(token, compID, chalID, flag string) map[string]any {
@@ -365,7 +397,7 @@ func main() {
 
 	// 注册 admin 用户并获取 token
 	log.Println("registering admin user...")
-	adminToken := registerAndLogin("seed_admin", "seed_admin_password")
+	adminToken := registerAndLoginWithRole("seed_admin", "seed_admin_password", "admin")
 
 	// 创建 50 道题目
 	log.Println("creating challenges...")
