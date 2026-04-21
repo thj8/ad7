@@ -29,11 +29,13 @@ func RegisterTeamRoutes(r chi.Router, deps RouteDeps) {
 }
 
 // RegisterAdminTeamRoutes 注册管理员队伍路由。
-// 路由：POST/PUT/DELETE /teams, POST/DELETE /teams/{id}/members
+// 路由：POST/PUT/DELETE /teams, POST/DELETE /teams/{id}/members, PUT /teams/{id}/captain, POST /teams/{id}/transfer-captain
 func RegisterAdminTeamRoutes(r chi.Router, deps RouteDeps) {
 	r.Post("/teams", deps.TeamH.Create)
 	r.Put("/teams/{id}", deps.TeamH.Update)
 	r.Delete("/teams/{id}", deps.TeamH.Delete)
 	r.Post("/teams/{id}/members", deps.TeamH.AddMember)
 	r.Delete("/teams/{id}/members/{user_id}", deps.TeamH.RemoveMember)
+	r.Put("/teams/{id}/captain", deps.TeamH.SetCaptain)
+	r.Post("/teams/{id}/transfer-captain", deps.TeamH.TransferCaptain)
 }

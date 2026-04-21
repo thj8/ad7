@@ -52,10 +52,108 @@ func (m *mockTeamStore) DeleteTeam(_ context.Context, resID string) error {
 	return nil
 }
 
+// mockTeamMemberStore 是 TeamMemberStore 的内存模拟实现。
+type mockTeamMemberStore struct {
+	members map[string]*TeamMember // key: teamID + ":" + userID
+	byTeam  map[string][]*TeamMember
+	byUser  map[string][]*TeamMember
+	nextID  int
+}
+
+func newMockTeamMemberStore() *mockTeamMemberStore {
+	return &mockTeamMemberStore{
+		members: make(map[string]*TeamMember),
+		byTeam:  make(map[string][]*TeamMember),
+		byUser:  make(map[string][]*TeamMember),
+	}
+}
+
+func (m *mockTeamMemberStore) key(teamID, userID string) string {
+	return teamID + ":" + userID
+}
+
+func (m *mockTeamMemberStore) AddMember(_ context.Context, teamID, userID, role string) (*TeamMember, error) {
+	key := m.key(teamID, userID)
+	if _, ok := m.members[key]; ok {
+		// 检查是否是软删除的，如果是则先移除
+		for i, tm := range m.byTeam[teamID] {
+			if tm.UserID == userID && tm.IsDeleted {
+				m.byTeam[teamID] = append(m.byTeam[teamID][:i], m.byTeam[teamID][i+1:]...)
+				break
+			}
+		}
+		for i, tm := range m.byUser[userID] {
+			if tm.TeamID == teamID && tm.IsDeleted {
+				m.byUser[userID] = append(m.byUser[userID][:i], m.byUser[userID][i+1:]...)
+				break
+			}
+		}
+	}
+
+	tm := &TeamMember{
+		TeamID: teamID,
+		UserID: userID,
+		Role:   role,
+	}
+	tm.ResID = "tm_id_" + string(rune('a'+m.nextID))
+	m.nextID++
+	m.members[key] = tm
+	m.byTeam[teamID] = append(m.byTeam[teamID], tm)
+	m.byUser[userID] = append(m.byUser[userID], tm)
+	return tm, nil
+}
+
+func (m *mockTeamMemberStore) RemoveMember(_ context.Context, teamID, userID string) error {
+	key := m.key(teamID, userID)
+	if tm, ok := m.members[key]; ok {
+		tm.IsDeleted = true
+	}
+	return nil
+}
+
+func (m *mockTeamMemberStore) GetMember(_ context.Context, teamID, userID string) (*TeamMember, error) {
+	key := m.key(teamID, userID)
+	if tm, ok := m.members[key]; ok && !tm.IsDeleted {
+		return tm, nil
+	}
+	return nil, nil
+}
+
+func (m *mockTeamMemberStore) ListTeamMembers(_ context.Context, teamID string) ([]*TeamMember, error) {
+	var result []*TeamMember
+	for _, tm := range m.byTeam[teamID] {
+		if !tm.IsDeleted {
+			result = append(result, tm)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockTeamMemberStore) GetUserTeams(_ context.Context, userID string) ([]*TeamMember, error) {
+	var result []*TeamMember
+	for _, tm := range m.byUser[userID] {
+		if !tm.IsDeleted {
+			result = append(result, tm)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockTeamMemberStore) GetTeamMemberCount(_ context.Context, teamID string) (int, error) {
+	count := 0
+	for _, tm := range m.byTeam[teamID] {
+		if !tm.IsDeleted {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func TestTeamService_CreateTeam(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	id, err := svc.CreateTeam(context.Background(), &Team{
 		Name:        "Team Alpha",
@@ -72,7 +170,8 @@ func TestTeamService_CreateTeam(t *testing.T) {
 func TestTeamService_CreateTeam_EmptyName(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	_, err := svc.CreateTeam(context.Background(), &Team{Name: ""})
 	if err == nil {
@@ -83,7 +182,8 @@ func TestTeamService_CreateTeam_EmptyName(t *testing.T) {
 func TestTeamService_GetTeam(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	id, _ := svc.CreateTeam(context.Background(), &Team{Name: "Team Alpha"})
 
@@ -99,7 +199,8 @@ func TestTeamService_GetTeam(t *testing.T) {
 func TestTeamService_GetTeam_NotFound(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	_, err := svc.GetTeam(context.Background(), "nonexistent")
 	if err != ErrNotFound {
@@ -110,7 +211,8 @@ func TestTeamService_GetTeam_NotFound(t *testing.T) {
 func TestTeamService_AddMember(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	teamID, _ := svc.CreateTeam(context.Background(), &Team{Name: "Team Alpha"})
 	user, _ := newTestAuthService(userStore).Register(context.Background(), &RegisterRequest{
@@ -118,7 +220,7 @@ func TestTeamService_AddMember(t *testing.T) {
 		Password: "pass",
 	})
 
-	err := svc.AddMember(context.Background(), teamID, user.ResID)
+	err := svc.AddMember(context.Background(), teamID, user.ResID, "member")
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -135,7 +237,8 @@ func TestTeamService_AddMember(t *testing.T) {
 func TestTeamService_RemoveMember(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	teamID, _ := svc.CreateTeam(context.Background(), &Team{Name: "Team Alpha"})
 	user, _ := newTestAuthService(userStore).Register(context.Background(), &RegisterRequest{
@@ -143,7 +246,7 @@ func TestTeamService_RemoveMember(t *testing.T) {
 		Password: "pass",
 	})
 
-	_ = svc.AddMember(context.Background(), teamID, user.ResID)
+	_ = svc.AddMember(context.Background(), teamID, user.ResID, "member")
 	err := svc.RemoveMember(context.Background(), teamID, user.ResID)
 	if err != nil {
 		t.Fatalf("RemoveMember: %v", err)
@@ -158,7 +261,8 @@ func TestTeamService_RemoveMember(t *testing.T) {
 func TestTeamService_DeleteTeam(t *testing.T) {
 	teamStore := newMockTeamStore()
 	userStore := newMockUserStore()
-	svc := NewTeamService(teamStore, userStore)
+	tmStore := newMockTeamMemberStore()
+	svc := NewTeamService(teamStore, userStore, tmStore)
 
 	id, _ := svc.CreateTeam(context.Background(), &Team{Name: "Team Alpha"})
 	err := svc.DeleteTeam(context.Background(), id)

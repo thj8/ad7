@@ -13,13 +13,29 @@ type User struct {
 	Username     string `json:"username"`      // 用户名（唯一）
 	PasswordHash string `json:"-"`             // bcrypt 密码哈希，不暴露给 API
 	Role         string `json:"role"`          // 角色（member / admin）
-	TeamID       string `json:"team_id,omitempty"` // 所属队伍的 res_id，可为空
 }
 
 // Team 表示参赛队伍。
-// 队伍可以包含多个用户，通过 users.team_id 关联。
+// 队伍可以包含多个用户，通过 team_members 关联。
 type Team struct {
 	model.BaseModel
 	Name        string `json:"name"`        // 队伍名称（唯一）
 	Description string `json:"description"` // 队伍描述
+}
+
+// TeamMember 表示队伍成员关系。
+// 支持队伍内部角色（captain/member）。
+type TeamMember struct {
+	model.BaseModel
+	TeamID string `json:"team_id"` // 队伍 res_id
+	UserID string `json:"user_id"` // 用户 res_id
+	Role   string `json:"role"`    // 角色：captain 或 member
+}
+
+// MemberInfo 表示队伍成员信息，用于 API 响应。
+type MemberInfo struct {
+	UserID   string `json:"user_id"`   // 用户 res_id
+	Username string `json:"username"`  // 用户名
+	Role     string `json:"role"`      // 角色：captain 或 member
+	JoinedAt string `json:"joined_at"` // 加入时间（RFC3339 格式）
 }

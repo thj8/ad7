@@ -43,7 +43,7 @@ func main() {
 
 	authStore := auth.NewAuthStore(st.DB())
 	authSvc := auth.NewAuthService(authStore, cfg.JWT.Secret, cfg.JWT.AdminRole)
-	teamSvc := auth.NewTeamService(authStore, authStore)
+	teamSvc := auth.NewTeamService(authStore, authStore, authStore)
 	authH := auth.NewAuthHandler(authSvc)
 	teamH := auth.NewTeamHandler(teamSvc)
 	verifyH := auth.NewVerifyHandler(authSvc)

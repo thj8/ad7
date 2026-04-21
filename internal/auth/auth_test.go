@@ -47,22 +47,21 @@ func (m *mockUserStore) GetUserByID(_ context.Context, resID string) (*User, err
 }
 
 func (m *mockUserStore) ListUsersByTeam(_ context.Context, teamID string) ([]User, error) {
+	return []User{}, nil
+}
+
+func (m *mockUserStore) SetTeamID(_ context.Context, userID, teamID string) error {
+	return nil
+}
+
+func (m *mockUserStore) ListUsersByResIDs(_ context.Context, resIDs []string) ([]User, error) {
 	var result []User
-	for _, u := range m.byID {
-		if u.TeamID == teamID {
+	for _, id := range resIDs {
+		if u, ok := m.byID[id]; ok {
 			result = append(result, *u)
 		}
 	}
 	return result, nil
-}
-
-func (m *mockUserStore) SetTeamID(_ context.Context, userID, teamID string) error {
-	u, ok := m.byID[userID]
-	if !ok {
-		return nil
-	}
-	u.TeamID = teamID
-	return nil
 }
 
 func (m *mockUserStore) DeleteUser(_ context.Context, resID string) error {

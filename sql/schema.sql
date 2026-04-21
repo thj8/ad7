@@ -107,9 +107,21 @@ CREATE TABLE IF NOT EXISTS users (
     username      VARCHAR(255)  NOT NULL UNIQUE,
     password_hash VARCHAR(255)  NOT NULL,
     role          VARCHAR(64)   NOT NULL DEFAULT 'member',
-    team_id       VARCHAR(32)   DEFAULT NULL,
     is_deleted    TINYINT(1)    NOT NULL DEFAULT 0,
     created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_team (team_id)
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS team_members (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    res_id     VARCHAR(32)   NOT NULL UNIQUE,
+    team_id    VARCHAR(32)   NOT NULL,
+    user_id    VARCHAR(32)   NOT NULL,
+    role       VARCHAR(64)   NOT NULL DEFAULT 'member',
+    is_deleted TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_team (team_id),
+    INDEX idx_user (user_id),
+    UNIQUE INDEX idx_team_user_active (team_id, user_id, is_deleted)
 );
