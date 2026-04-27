@@ -43,3 +43,15 @@ func Validate(id string) error {
 	}
 	return nil
 }
+
+// ValidateIfPresent 仅在 id 非空时验证格式。
+// 适合用于可选的查询参数：验证失败返回空字符串，忽略该过滤条件。
+func ValidateIfPresent(id string) string {
+	if id == "" {
+		return ""
+	}
+	if Validate(id) == nil {
+		return id
+	}
+	return ""
+}

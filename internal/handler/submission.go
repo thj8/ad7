@@ -9,6 +9,7 @@ import (
 	"ad7/internal/middleware"
 	"ad7/internal/service"
 	"ad7/internal/store"
+	"ad7/internal/uuid"
 )
 
 // SubmissionHandler 处理 Flag 提交相关的 HTTP 请求。
@@ -63,10 +64,11 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 
 // ListByComp 处理 GET /api/v1/admin/competitions/{id}/submissions 请求（管理员）。
 // 支持通过 query 参数 user_id 和 challenge_id 过滤提交记录。
+// 无效的 ID 参数会被忽略（当作没传），不会返回 400 错误。
 func (h *SubmissionHandler) ListByComp(w http.ResponseWriter, r *http.Request) {
 	compID := middleware.ID(r)
-	userID := r.URL.Query().Get("user_id")
-	challengeID := r.URL.Query().Get("challenge_id")
+	userID := uuid.ValidateIfPresent(r.URL.Query().Get("user_id"))
+	challengeID := uuid.ValidateIfPresent(r.URL.Query().Get("challenge_id"))
 	subs, err := h.svc.ListByComp(r.Context(), store.ListSubmissionsParams{
 		CompetitionID: compID,
 		UserID:        userID,
