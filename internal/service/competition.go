@@ -15,6 +15,21 @@ import (
 // ErrConflict 表示操作冲突（如重复开始/结束比赛）。
 var ErrConflict = errors.New("conflict")
 
+// ErrMustJoinTeam 表示必须先加入队伍才能参加。
+var ErrMustJoinTeam = errors.New("must join a team to participate")
+
+// ErrTeamNotRegistered 表示队伍未注册到比赛。
+var ErrTeamNotRegistered = errors.New("your team is not registered for this competition")
+
+// ErrCompNotTeamMode 表示比赛不是队伍模式。
+var ErrCompNotTeamMode = errors.New("competition is not in team mode")
+
+// ErrCompFreeMode 表示比赛是自由模式，不能通过管理员添加队伍。
+var ErrCompFreeMode = errors.New("competition uses free join mode")
+
+// ErrInvalidMode 表示无效的比赛模式。
+var ErrInvalidMode = errors.New("invalid mode value")
+
 // CompetitionService 封装比赛相关的业务逻辑。
 // 持有 CompetitionStore 接口用于数据访问。
 type CompetitionService struct {
@@ -72,6 +87,8 @@ func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Comp
 // Create 创建新比赛。执行以下业务规则：
 //   - title 为必填字段
 //   - end_time 必须晚于 start_time
+//   - mode 必须是 individual 或 team
+//   - team_join_mode 必须是 free 或 managed
 //   - 新建比赛默认激活（is_active = true）
 //
 // 返回新生成比赛的 res_id。
@@ -83,6 +100,15 @@ func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (
 	// 验证时间合法性
 	if c.EndTime.Before(c.StartTime) {
 		return "", errors.New("end_time must be after start_time")
+	}
+	// 验证模式合法性
+	if c.Mode != model.CompetitionModeIndividual && c.Mode != model.CompetitionModeTeam {
+		return "", ErrInvalidMode
+	}
+	if c.Mode == model.CompetitionModeTeam {
+		if c.TeamJoinMode != model.TeamJoinModeFree && c.TeamJoinMode != model.TeamJoinModeManaged {
+			return "", ErrInvalidMode
+		}
 	}
 	// 新建比赛默认激活
 	c.IsActive = true
@@ -116,6 +142,19 @@ func (s *CompetitionService) Update(ctx context.Context, resID string, patch *mo
 	if !patch.EndTime.IsZero() {
 		existing.EndTime = patch.EndTime
 	}
+	// 合并模式（如果提供）
+	if patch.Mode != "" {
+		if patch.Mode != model.CompetitionModeIndividual && patch.Mode != model.CompetitionModeTeam {
+			return ErrInvalidMode
+		}
+		existing.Mode = patch.Mode
+	}
+	if patch.TeamJoinMode != "" {
+		if patch.TeamJoinMode != model.TeamJoinModeFree && patch.TeamJoinMode != model.TeamJoinModeManaged {
+			return ErrInvalidMode
+		}
+		existing.TeamJoinMode = patch.TeamJoinMode
+	}
 	// 合并后再次验证时间合法性
 	if existing.EndTime.Before(existing.StartTime) {
 		return errors.New("end_time must be after start_time")
@@ -123,6 +162,81 @@ func (s *CompetitionService) Update(ctx context.Context, resID string, patch *mo
 	// is_active 总是被显式设置
 	existing.IsActive = patch.IsActive
 	return s.store.UpdateCompetition(ctx, existing)
+}
+
+// CheckCompAccess 检查用户是否有访问比赛的权限。
+// 个人模式：总是允许。
+// 队伍模式-自由：用户必须有队伍。
+// 队伍模式-管理：用户必须在比赛注册的队伍中。
+func (s *CompetitionService) CheckCompAccess(ctx context.Context, compID, userID string, teamResolver *TeamResolver) error {
+	c, err := s.store.GetCompetitionByID(ctx, compID)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return ErrNotFound
+	}
+	if c.Mode == model.CompetitionModeIndividual {
+		return nil
+	}
+	teamID, err := teamResolver.GetUserTeam(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if teamID == "" {
+		return ErrMustJoinTeam
+	}
+	if c.TeamJoinMode == model.TeamJoinModeManaged {
+		inComp, err := s.store.IsTeamInComp(ctx, compID, teamID)
+		if err != nil {
+			return err
+		}
+		if !inComp {
+			return ErrTeamNotRegistered
+		}
+	}
+	return nil
+}
+
+// AddCompTeam 将一支队伍加入比赛，仅在队伍模式-管理模式下允许。
+func (s *CompetitionService) AddCompTeam(ctx context.Context, compID, teamID string) error {
+	c, err := s.store.GetCompetitionByID(ctx, compID)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return ErrNotFound
+	}
+	if c.Mode != model.CompetitionModeTeam {
+		return ErrCompNotTeamMode
+	}
+	if c.TeamJoinMode != model.TeamJoinModeManaged {
+		return ErrCompFreeMode
+	}
+	return s.store.AddCompTeam(ctx, compID, teamID)
+}
+
+// RemoveCompTeam 将一支队伍从比赛中移除。
+func (s *CompetitionService) RemoveCompTeam(ctx context.Context, compID, teamID string) error {
+	c, err := s.store.GetCompetitionByID(ctx, compID)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return ErrNotFound
+	}
+	if c.Mode != model.CompetitionModeTeam {
+		return ErrCompNotTeamMode
+	}
+	if c.TeamJoinMode != model.TeamJoinModeManaged {
+		return ErrCompFreeMode
+	}
+	return s.store.RemoveCompTeam(ctx, compID, teamID)
+}
+
+// ListCompTeams 列出比赛中所有的队伍。
+func (s *CompetitionService) ListCompTeams(ctx context.Context, compID string) ([]model.CompetitionTeam, error) {
+	return s.store.ListCompTeams(ctx, compID)
 }
 
 // Delete 软删除比赛（同时删除题目关联记录）。

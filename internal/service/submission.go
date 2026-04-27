@@ -25,15 +25,18 @@ const (
 )
 
 // SubmissionService 封装 Flag 提交相关的业务逻辑。
-// 持有 ChallengeStore（用于验证题目和 Flag）和 SubmissionStore（用于记录提交）。
+// 持有 ChallengeStore（用于验证题目和 Flag）、SubmissionStore（用于记录提交）、
+// CompetitionStore（用于获取比赛模式）、TeamResolver（用于获取用户队伍）。
 type SubmissionService struct {
 	challenges  store.ChallengeStore
 	submissions store.SubmissionStore
+	competitions store.CompetitionStore
+	teamResolver *TeamResolver
 }
 
 // NewSubmissionService 创建 SubmissionService 实例。
-func NewSubmissionService(c store.ChallengeStore, s store.SubmissionStore) *SubmissionService {
-	return &SubmissionService{challenges: c, submissions: s}
+func NewSubmissionService(c store.ChallengeStore, s store.SubmissionStore, cs store.CompetitionStore, tr *TeamResolver) *SubmissionService {
+	return &SubmissionService{challenges: c, submissions: s, competitions: cs, teamResolver: tr}
 }
 
 // SubmitInCompRequest 是比赛内 Flag 提交的请求参数。
@@ -46,19 +49,57 @@ type SubmitInCompRequest struct {
 
 // SubmitInComp 处理比赛范围内的 Flag 提交。
 // 流程：
-//  1. 检查用户在该比赛中是否已正确提交过该题目，如果是返回 ResultAlreadySolved
-//  2. 查询题目是否存在且启用
-//  3. 比较提交的 Flag 与题目答案
-//  4. 创建提交记录
-//  5. 如果正确，发布事件通知（供插件消费）
+//  1. 获取比赛模式
+//  2. 队伍模式：获取用户队伍，检查队伍是否已解决该题
+//  3. 个人模式：检查用户是否已解决该题
+//  4. 查询题目是否存在且启用
+//  5. 比较提交的 Flag 与题目答案
+//  6. 创建提交记录（包含 team_id，如果是队伍模式）
+//  7. 如果正确，发布事件通知（供插件消费）
 func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompRequest) (SubmitResult, error) {
-	solved, err := s.submissions.HasCorrectSubmission(ctx, req.UserID, req.ChallengeID, req.CompetitionID)
+	comp, err := s.competitions.GetCompetitionByID(ctx, req.CompetitionID)
 	if err != nil {
 		return "", err
 	}
-	if solved {
-		logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "already_solved")
-		return ResultAlreadySolved, nil
+	if comp == nil {
+		return "", ErrNotFound
+	}
+
+	var teamID string
+	if comp.Mode == model.CompetitionModeTeam {
+		teamID, err = s.teamResolver.GetUserTeam(ctx, req.UserID)
+		if err != nil {
+			return "", err
+		}
+		if teamID == "" {
+			return "", ErrMustJoinTeam
+		}
+		if comp.TeamJoinMode == model.TeamJoinModeManaged {
+			inComp, err := s.competitions.IsTeamInComp(ctx, req.CompetitionID, teamID)
+			if err != nil {
+				return "", err
+			}
+			if !inComp {
+				return "", ErrTeamNotRegistered
+			}
+		}
+		solved, err := s.submissions.HasTeamCorrectSubmission(ctx, teamID, req.ChallengeID, req.CompetitionID)
+		if err != nil {
+			return "", err
+		}
+		if solved {
+			logger.Info("flag submitted", "user", req.UserID, "team", teamID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "already_solved")
+			return ResultAlreadySolved, nil
+		}
+	} else {
+		solved, err := s.submissions.HasCorrectSubmission(ctx, req.UserID, req.ChallengeID, req.CompetitionID)
+		if err != nil {
+			return "", err
+		}
+		if solved {
+			logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "already_solved")
+			return ResultAlreadySolved, nil
+		}
 	}
 
 	challenge, err := s.challenges.GetEnabledByID(ctx, req.ChallengeID)
@@ -72,6 +113,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 	isCorrect := challenge.Flag == req.Flag
 	if err := s.submissions.CreateSubmission(ctx, &model.Submission{
 		UserID:        req.UserID,
+		TeamID:        teamID,
 		ChallengeID:   req.ChallengeID,
 		CompetitionID: req.CompetitionID,
 		SubmittedFlag: req.Flag,
@@ -84,15 +126,16 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		event.Publish(event.Event{
 			Type:          event.EventCorrectSubmission,
 			UserID:        req.UserID,
+			TeamID:        teamID,
 			ChallengeID:   req.ChallengeID,
 			CompetitionID: req.CompetitionID,
 			SubmittedAt:   time.Now(),
 			Ctx:           ctx,
 		})
-		logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "correct")
+		logger.Info("flag submitted", "user", req.UserID, "team", teamID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "correct")
 		return ResultCorrect, nil
 	}
-	logger.Info("flag submitted", "user", req.UserID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "incorrect")
+	logger.Info("flag submitted", "user", req.UserID, "team", teamID, "challenge", req.ChallengeID, "competition", req.CompetitionID, "result", "incorrect")
 	return ResultIncorrect, nil
 }
 
