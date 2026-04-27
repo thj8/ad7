@@ -23,6 +23,7 @@ const (
 type Event struct {
 	Type          EventType       // 事件类型
 	UserID        string          // 提交用户的 ID
+	TeamID        string          // 队伍 ID（队伍模式时填写）
 	ChallengeID   string          // 题目的 res_id
 	CompetitionID string          // 所属比赛的 res_id
 	SubmittedAt   time.Time       // 实际提交时间
