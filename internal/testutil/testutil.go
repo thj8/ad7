@@ -82,8 +82,8 @@ func NewTestEnv(m *testing.M) *TestEnv {
 			}
 		}
 	}{}
-	cfg.RateLimit.Submission.Requests = 3
-	cfg.RateLimit.Submission.Window = 10 * time.Second
+	cfg.RateLimit.Submission.Requests = 10
+	cfg.RateLimit.Submission.Window = time.Second
 
 	// 启动 auth 测试服务器
 	authStore := auth.NewAuthStore(st.DB())

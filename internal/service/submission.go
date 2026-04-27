@@ -65,8 +65,12 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 	if comp == nil {
 		return "", ErrNotFound
 	}
-	// 检查比赛是否在激活状态（IsActive 已包含时间范围检查）
+	// 检查比赛是否在激活状态且在有效时间范围内
 	if !comp.IsActive {
+		return "", ErrCompetitionNotActive
+	}
+	now := time.Now()
+	if now.Before(comp.StartTime.Time()) || now.After(comp.EndTime.Time()) {
 		return "", ErrCompetitionNotActive
 	}
 

@@ -425,14 +425,14 @@ func TestSubmitFlagRateLimit(t *testing.T) {
 
 	submitPath := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID)
 
-	// First 3 requests should succeed (rate limit is 3 per 10s)
-	for i := 0; i < 3; i++ {
+	// First 10 requests should succeed (rate limit is 10 per second)
+	for i := 0; i < 10; i++ {
 		resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath, `{"flag":"wrong"}`, userTok)
 		testutil.AssertStatus(t, resp, 200)
 		resp.Body.Close()
 	}
 
-	// 4th request should be rate limited (429)
+	// 11th request should be rate limited (429)
 	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath, `{"flag":"wrong"}`, userTok)
 	testutil.AssertStatus(t, resp, http.StatusTooManyRequests)
 	resp.Body.Close()

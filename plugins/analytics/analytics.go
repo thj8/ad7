@@ -72,8 +72,8 @@ type categoryStats struct {
 
 // userStatsResponse 是用户统计的响应结构。
 type userStatsResponse struct {
-	Users []userStats `json:"users,omitempty"`
-	Teams []teamStats `json:"teams,omitempty"`
+	Users []userStats `json:"users"`
+	Teams []teamStats `json:"teams"`
 }
 
 // userStats 是单个用户的统计数据。
