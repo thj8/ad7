@@ -52,7 +52,7 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 // 返回排名 1-3 的记录（按排名升序）。
 func getCurrentTopThreeForUpdate(ctx context.Context, tx *sql.Tx, compID, chalID string) ([]topThreeRecord, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, res_id, competition_id, challenge_id, user_id, ranking, created_at, updated_at, is_deleted
+		SELECT id, res_id, competition_id, challenge_id, user_id, team_id, ranking, created_at, updated_at, is_deleted
 		FROM topthree_records
 		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
 		ORDER BY ranking ASC
@@ -66,21 +66,31 @@ func getCurrentTopThreeForUpdate(ctx context.Context, tx *sql.Tx, compID, chalID
 	var records []topThreeRecord
 	for rows.Next() {
 		var r topThreeRecord
-		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &r.Ranking, &r.CreatedAt, &r.UpdatedAt, &r.IsDeleted)
+		var teamID sql.NullString
+		err := rows.Scan(&r.ID, &r.ResID, &r.CompetitionID, &r.ChallengeID, &r.UserID, &teamID, &r.Ranking, &r.CreatedAt, &r.UpdatedAt, &r.IsDeleted)
 		if err != nil {
 			return nil, err
+		}
+		if teamID.Valid {
+			r.TeamID = teamID.String
 		}
 		records = append(records, r)
 	}
 	return records, rows.Err()
 }
 
-// userInTopThree 检查用户是否已在三血名单中。
+// entityInTopThree 检查用户或队伍是否已在三血名单中。
 // 如果已在名单中则跳过（不允许重复上榜）。
-func userInTopThree(current []topThreeRecord, userID string) bool {
+func entityInTopThree(current []topThreeRecord, userID, teamID, mode string) bool {
 	for _, r := range current {
-		if r.UserID == userID {
-			return true
+		if mode == "team" && teamID != "" {
+			if r.TeamID == teamID {
+				return true
+			}
+		} else {
+			if r.UserID == userID {
+				return true
+			}
 		}
 	}
 	return false
@@ -111,6 +121,8 @@ type updateTopThreeRequest struct {
 	CompID     string // 比赛ID
 	ChalID     string // 题目ID
 	UserID     string // 用户ID
+	TeamID     string // 队伍ID（如果是队伍模式）
+	Mode       string // 比赛模式（individual/team）
 	NewRank    int    // 新排名（1-3）
 	SubmitTime time.Time // 提交时间
 	Current    []topThreeRecord // 当前三血记录
@@ -155,12 +167,28 @@ func updateTopThreeInTx(ctx context.Context, tx *sql.Tx, req *updateTopThreeRequ
 
 	// 插入新的三血记录
 	resID := uuid.Next()
+	var teamID sql.NullString
+	if req.Mode == "team" && req.TeamID != "" {
+		teamID = sql.NullString{String: req.TeamID, Valid: true}
+	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO topthree_records
-		(res_id, competition_id, challenge_id, user_id, ranking, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, resID, req.CompID, req.ChalID, req.UserID, req.NewRank, req.SubmitTime)
+		(res_id, competition_id, challenge_id, user_id, team_id, ranking, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, resID, req.CompID, req.ChalID, req.UserID, teamID, req.NewRank, req.SubmitTime)
 	return err
+}
+
+// getCompetitionMode 查询比赛的模式
+func getCompetitionMode(ctx context.Context, tx *sql.Tx, compID string) (string, error) {
+	var mode string
+	err := tx.QueryRowContext(ctx, `
+		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
+	`, compID).Scan(&mode)
+	if err != nil {
+		return "", err
+	}
+	return mode, nil
 }
 
 // handleCorrectSubmission 处理正确提交事件，更新三血排名。
@@ -169,6 +197,7 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	compID := e.CompetitionID
 	chalID := e.ChallengeID
 	userID := e.UserID
+	teamID := e.TeamID
 	submitTime := e.SubmittedAt
 
 	ctx := context.Background()
@@ -181,6 +210,13 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	}
 	defer tx.Rollback()
 
+	// 获取比赛模式
+	mode, err := getCompetitionMode(ctx, tx, compID)
+	if err != nil {
+		log.Printf("[topthree] 查询比赛模式失败: comp=%s err=%v", compID, err)
+		return
+	}
+
 	// 在事务中加锁读取当前三血记录
 	current, err := getCurrentTopThreeForUpdate(ctx, tx, compID, chalID)
 	if err != nil {
@@ -188,8 +224,8 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 		return
 	}
 
-	// 用户已上榜则跳过
-	if userInTopThree(current, userID) {
+	// 队伍模式检查队伍是否已上榜，个人模式检查用户
+	if entityInTopThree(current, userID, teamID, mode) {
 		return
 	}
 
@@ -204,11 +240,13 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 		CompID:     compID,
 		ChalID:     chalID,
 		UserID:     userID,
+		TeamID:     teamID,
+		Mode:       mode,
 		NewRank:    newRank,
 		SubmitTime: submitTime,
 		Current:    current,
 	}); err != nil {
-		log.Printf("[topthree] 更新三血排名失败: comp=%s chal=%s user=%s rank=%d err=%v", compID, chalID, userID, newRank, err)
+		log.Printf("[topthree] 更新三血排名失败: comp=%s chal=%s user=%s team=%s rank=%d err=%v", compID, chalID, userID, teamID, newRank, err)
 		return
 	}
 

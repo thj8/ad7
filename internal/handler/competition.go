@@ -1,5 +1,5 @@
 // Package handler 实现比赛相关的 HTTP 请求处理。
-// CompetitionHandler 负责比赛的 CRUD、题目分配等 HTTP 接口。
+// CompetitionHandler 负责比赛的 CRUD、题目分配、队伍管理等 HTTP 接口。
 package handler
 
 import (
@@ -16,15 +16,16 @@ import (
 )
 
 // CompetitionHandler 处理比赛相关的 HTTP 请求。
-// 持有 CompetitionService 用于业务逻辑调用。
+// 持有 CompetitionService 用于业务逻辑调用，TeamResolver 用于检查访问权限。
 type CompetitionHandler struct {
-	svc *service.CompetitionService
+	svc          *service.CompetitionService
+	teamResolver *service.TeamResolver
 }
 
 // NewCompetitionHandler 创建 CompetitionHandler 实例。
-// 参数 svc: 比赛业务逻辑服务。
-func NewCompetitionHandler(svc *service.CompetitionService) *CompetitionHandler {
-	return &CompetitionHandler{svc: svc}
+// 参数 svc: 比赛业务逻辑服务；tr: 队伍解析器。
+func NewCompetitionHandler(svc *service.CompetitionService, tr *service.TeamResolver) *CompetitionHandler {
+	return &CompetitionHandler{svc: svc, teamResolver: tr}
 }
 
 // List 处理 GET /api/v1/competitions 请求。
@@ -64,12 +65,32 @@ func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // ListChallenges 处理 GET /api/v1/competitions/{id}/challenges 请求。
 // 返回指定比赛中所有已启用的题目列表。
+// 队伍模式下会检查访问权限。
 func (h *CompetitionHandler) ListChallenges(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+
+	if err := h.svc.CheckCompAccess(r.Context(), id, middleware.UserID(r), h.teamResolver); err != nil {
+		if err == service.ErrMustJoinTeam {
+			writeError(w, http.StatusForbidden, "must join a team to participate")
+			return
+		}
+		if err == service.ErrTeamNotRegistered {
+			writeError(w, http.StatusForbidden, "your team is not registered for this competition")
+			return
+		}
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		logger.Error("check competition access", "error", err, "user_id", middleware.UserID(r))
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	cs, err := h.svc.ListChallenges(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -84,10 +105,12 @@ func (h *CompetitionHandler) ListChallenges(w http.ResponseWriter, r *http.Reque
 // compCreateRequest 是创建比赛的请求体结构。
 // 时间字段使用字符串传输，在 Handler 中解析为 time.Time。
 type compCreateRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	StartTime     string `json:"start_time"`
+	EndTime       string `json:"end_time"`
+	Mode         string `json:"mode"`
+	TeamJoinMode string `json:"team_join_mode"`
 }
 
 // Create 处理 POST /api/v1/admin/competitions 请求（管理员）。
@@ -118,10 +141,12 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := &model.Competition{
-		Title:       req.Title,
-		Description: req.Description,
-		StartTime:   startTime,
-		EndTime:     endTime,
+		Title:         req.Title,
+		Description:   req.Description,
+		StartTime:     startTime,
+		EndTime:       endTime,
+		Mode:         model.CompetitionMode(req.Mode),
+		TeamJoinMode: model.TeamJoinMode(req.TeamJoinMode),
 	}
 	id, err := h.svc.Create(r.Context(), c)
 	if err != nil {
@@ -133,13 +158,14 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // compUpdateRequest 是更新比赛的请求体结构。
-// 与创建请求的区别在于多一个 is_active 字段，且时间字段可选。
 type compUpdateRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
-	IsActive    bool   `json:"is_active"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	StartTime     string `json:"start_time"`
+	EndTime       string `json:"end_time"`
+	IsActive      bool   `json:"is_active"`
+	Mode         string `json:"mode"`
+	TeamJoinMode string `json:"team_join_mode"`
 }
 
 // Update 处理 PUT /api/v1/admin/competitions/{id} 请求（管理员）。
@@ -162,9 +188,11 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := &model.Competition{
-		Title:       req.Title,
-		Description: req.Description,
-		IsActive:    req.IsActive,
+		Title:         req.Title,
+		Description:   req.Description,
+		IsActive:      req.IsActive,
+		Mode:         model.CompetitionMode(req.Mode),
+		TeamJoinMode: model.TeamJoinMode(req.TeamJoinMode),
 	}
 	// 仅在提供了开始时间时才更新
 	if req.StartTime != "" {
@@ -186,6 +214,9 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.svc.Update(r.Context(), id, patch); err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	} else if err == service.ErrInvalidMode {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -268,6 +299,110 @@ func (h *CompetitionHandler) RemoveChallenge(w http.ResponseWriter, r *http.Requ
 	}
 	logger.Info("challenge removed", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "competition_id", compID, "challenge_id", chalID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// compTeamRequest 是管理比赛队伍的请求体结构。
+type compTeamRequest struct {
+	TeamID string `json:"team_id"`
+}
+
+// compTeamResponse 是比赛队伍列表的响应结构。
+type compTeamResponse struct {
+	Teams []struct {
+		ID string `json:"id"`
+	} `json:"teams"`
+}
+
+// ListTeams 处理 GET /api/v1/competitions/{id}/teams 请求。
+// 返回比赛中的队伍列表（仅管理员模式比赛使用）。
+func (h *CompetitionHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
+	compID, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	teams, err := h.svc.ListCompTeams(r.Context(), compID)
+	if err != nil {
+		logger.Error("list competition teams", "error", err, "user_id", middleware.UserID(r))
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := compTeamResponse{
+		Teams: make([]struct {
+			ID string `json:"id"`
+		}, len(teams)),
+	}
+	for i, t := range teams {
+		resp.Teams[i].ID = t.TeamID
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AddTeam 处理 POST /api/v1/admin/competitions/{id}/teams 请求（管理员）。
+// 将一支队伍添加到比赛中（仅管理员模式比赛使用）。
+func (h *CompetitionHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
+	compID, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req compTeamRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	defer r.Body.Close()
+	if err := validateLen("team_id", req.TeamID, 32); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.svc.AddCompTeam(r.Context(), compID, req.TeamID); err != nil {
+		if err == service.ErrCompNotTeamMode || err == service.ErrCompFreeMode {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		logger.Error("add competition team", "error", err, "user_id", middleware.UserID(r))
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// RemoveTeam 处理 DELETE /api/v1/admin/competitions/{id}/teams/{team_id} 请求（管理员）。
+// 从比赛中移除一支队伍。
+func (h *CompetitionHandler) RemoveTeam(w http.ResponseWriter, r *http.Request) {
+	compID, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	teamID := chi.URLParam(r, "team_id")
+	if len(teamID) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid team_id")
+		return
+	}
+
+	if err := h.svc.RemoveCompTeam(r.Context(), compID, teamID); err != nil {
+		if err == service.ErrCompNotTeamMode || err == service.ErrCompFreeMode {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		logger.Error("remove competition team", "error", err, "user_id", middleware.UserID(r))
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 // Start 处理 POST /api/v1/admin/competitions/{id}/start 请求（管理员）。

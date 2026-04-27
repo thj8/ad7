@@ -10,6 +10,7 @@ func RegisterCompetitionRoutes(r chi.Router, deps RouteDeps) {
 	r.Get("/competitions", deps.CompetitionH.List)
 	r.Get("/competitions/{id}", deps.CompetitionH.Get)
 	r.Get("/competitions/{id}/challenges", deps.CompetitionH.ListChallenges)
+	r.Get("/competitions/{id}/teams", deps.CompetitionH.ListTeams)
 }
 
 // registerAdminCompetitionRoutes 注册比赛 Admin 路由。
@@ -24,4 +25,6 @@ func registerAdminCompetitionRoutes(r chi.Router, deps RouteDeps) {
 	r.Delete("/competitions/{id}/challenges/{challenge_id}", deps.CompetitionH.RemoveChallenge)
 	r.Post("/competitions/{id}/start", deps.CompetitionH.Start)
 	r.Post("/competitions/{id}/end", deps.CompetitionH.End)
+	r.Post("/competitions/{id}/teams", deps.CompetitionH.AddTeam)
+	r.Delete("/competitions/{id}/teams/{team_id}", deps.CompetitionH.RemoveTeam)
 }

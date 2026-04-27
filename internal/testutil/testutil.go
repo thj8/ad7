@@ -121,12 +121,13 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	authServer.Config.Handler = fullR
 
 	auth := middleware.NewAuth(authServer.URL, AdminRole)
+	teamResolver := service.NewTeamResolver(authServer.URL)
 	challengeSvc := service.NewChallengeService(st)
-	submissionSvc := service.NewSubmissionService(st, st)
+	submissionSvc := service.NewSubmissionService(st, st, st, teamResolver)
 	compSvc := service.NewCompetitionService(st)
 	challengeH := handler.NewChallengeHandler(challengeSvc)
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
-	compH := handler.NewCompetitionHandler(compSvc)
+	compH := handler.NewCompetitionHandler(compSvc, teamResolver)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Recoverer)
@@ -194,6 +195,7 @@ func Cleanup(t *testing.T, db *sql.DB) {
 	db.Exec("DELETE FROM topthree_records")
 	db.Exec("DELETE FROM hints")
 	db.Exec("DELETE FROM competition_challenges")
+	db.Exec("DELETE FROM competition_teams")
 	db.Exec("DELETE FROM notifications")
 	db.Exec("DELETE FROM submissions")
 	db.Exec("DELETE FROM competitions")

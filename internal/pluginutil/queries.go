@@ -31,6 +31,13 @@ type FirstSolve struct {
 	SolvedAt    time.Time
 }
 
+// TeamFirstSolve 队伍在某道题目的最早正确提交记录。
+type TeamFirstSolve struct {
+	TeamID      string
+	ChallengeID string
+	SolvedAt    time.Time
+}
+
 // GetCompChallenges 获取比赛中所有已启用且未删除的题目摘要信息。
 // 按题目 res_id 排序。调用方只需 ID 列表时，从返回值中提取 .ResID 即可。
 func GetCompChallenges(ctx context.Context, db DBTX, compID string) ([]ChallengeInfo, error) {
@@ -83,6 +90,30 @@ func GetCorrectSubmissions(ctx context.Context, db DBTX, compID string) ([]First
 	return solves, rows.Err()
 }
 
+// GetTeamCorrectSubmissions 获取比赛中每队每题的正确提交。
+// 每个队伍对每道题最多一条记录（通过 GROUP BY 去重）。
+func GetTeamCorrectSubmissions(ctx context.Context, db DBTX, compID string) ([]TeamFirstSolve, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT s.team_id, s.challenge_id, MIN(s.created_at)
+		FROM submissions s
+		WHERE s.competition_id = ? AND s.is_correct = 1 AND s.is_deleted = 0 AND s.team_id != ''
+		GROUP BY s.team_id, s.challenge_id`, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var solves []TeamFirstSolve
+	for rows.Next() {
+		var fs TeamFirstSolve
+		if err := rows.Scan(&fs.TeamID, &fs.ChallengeID, &fs.SolvedAt); err != nil {
+			return nil, err
+		}
+		solves = append(solves, fs)
+	}
+	return solves, rows.Err()
+}
+
 // GetUserScores 获取比赛中每用户的总得分。
 // 通过 JOIN challenges 表计算正确提交对应的分数之和。
 func GetUserScores(ctx context.Context, db DBTX, compID string) (map[string]int, error) {
@@ -105,6 +136,32 @@ func GetUserScores(ctx context.Context, db DBTX, compID string) (map[string]int,
 			return nil, err
 		}
 		scores[uid] = score
+	}
+	return scores, rows.Err()
+}
+
+// GetTeamScores 获取比赛中每队的总得分。
+// 通过 JOIN challenges 表计算正确提交对应的分数之和。
+func GetTeamScores(ctx context.Context, db DBTX, compID string) (map[string]int, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT s.team_id, SUM(c.score)
+		FROM submissions s
+		JOIN challenges c ON c.res_id = s.challenge_id
+		WHERE s.is_correct = 1 AND s.competition_id = ? AND s.is_deleted = 0 AND c.is_deleted = 0 AND s.team_id != ''
+		GROUP BY s.team_id`, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	scores := make(map[string]int)
+	for rows.Next() {
+		var tid string
+		var score int
+		if err := rows.Scan(&tid, &score); err != nil {
+			return nil, err
+		}
+		scores[tid] = score
 	}
 	return scores, rows.Err()
 }
@@ -286,6 +343,61 @@ func GetUserSolveStats(ctx context.Context, db DBTX, compID string) ([]UserSolve
 		stats = append(stats, s)
 	}
 	return stats, rows.Err()
+}
+
+// TeamSolveStat 队伍解题统计
+type TeamSolveStat struct {
+	TeamID      string
+	TotalScore  int
+	SolveCount  int
+	LastSolveAt *time.Time
+}
+
+// GetTeamSolveStats 获取比赛中所有队伍的解题统计
+// 按总分降序、解题数降序排列
+func GetTeamSolveStats(ctx context.Context, db DBTX, compID string) ([]TeamSolveStat, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			s.team_id,
+			SUM(c.score) as total_score,
+			COUNT(DISTINCT s.challenge_id) as solve_count,
+			MAX(s.created_at) as last_solve_at
+		FROM submissions s
+		JOIN challenges c ON c.res_id = s.challenge_id
+		WHERE s.is_correct = 1 AND s.competition_id = ? AND s.is_deleted = 0 AND c.is_deleted = 0 AND s.team_id != ''
+		GROUP BY s.team_id
+		ORDER BY total_score DESC, solve_count DESC, last_solve_at ASC
+	`, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []TeamSolveStat
+	for rows.Next() {
+		var s TeamSolveStat
+		var lastSolveAt sql.NullTime
+		if err := rows.Scan(&s.TeamID, &s.TotalScore, &s.SolveCount, &lastSolveAt); err != nil {
+			return nil, err
+		}
+		if lastSolveAt.Valid {
+			s.LastSolveAt = &lastSolveAt.Time
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetCompetitionMode 获取比赛的模式
+func GetCompetitionMode(ctx context.Context, db DBTX, compID string) (string, error) {
+	var mode string
+	err := db.QueryRowContext(ctx, `
+		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
+	`, compID).Scan(&mode)
+	if err != nil {
+		return "", err
+	}
+	return mode, nil
 }
 
 // GetAverageSolveTimeFromStart 获取平均解题时间（从比赛开始到首次正确提交的平均秒数）

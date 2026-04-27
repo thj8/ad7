@@ -1,6 +1,7 @@
 package topthree
 
 import (
+	"database/sql"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -48,7 +49,7 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 
 	// 单次查询获取该比赛所有三血记录（消除 N+1 问题）
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT challenge_id, user_id, ranking, created_at
+		SELECT challenge_id, user_id, team_id, ranking, created_at
 		FROM topthree_records
 		WHERE competition_id = ? AND is_deleted = 0
 		ORDER BY ranking ASC
@@ -62,9 +63,13 @@ func (p *Plugin) getTopThree(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var chalID string
 		var e topThreeEntry
-		if err := rows.Scan(&chalID, &e.UserID, &e.Ranking, &e.CreatedAt); err != nil {
+		var teamID sql.NullString
+		if err := rows.Scan(&chalID, &e.UserID, &teamID, &e.Ranking, &e.CreatedAt); err != nil {
 			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
 			return
+		}
+		if teamID.Valid {
+			e.TeamID = teamID.String
 		}
 		if ct, ok := challengeMap[chalID]; ok {
 			ct.TopThree = append(ct.TopThree, e)

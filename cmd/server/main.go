@@ -63,15 +63,18 @@ func main() {
 	// 创建认证中间件，传入认证服务地址和管理员角色名
 	authMW := middleware.NewAuth(cfg.Auth.URL, cfg.JWT.AdminRole)
 
+	// 创建 TeamResolver，用于解析用户队伍
+	teamResolver := service.NewTeamResolver(cfg.Auth.URL)
+
 	// 初始化 Service 层，注入对应的 Store 接口
 	challengeSvc := service.NewChallengeService(st)
-	submissionSvc := service.NewSubmissionService(st, st)
+	submissionSvc := service.NewSubmissionService(st, st, st, teamResolver)
 	compSvc := service.NewCompetitionService(st)
 
 	// 初始化 Handler 层，注入对应的 Service
 	challengeH := handler.NewChallengeHandler(challengeSvc)
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
-	compH := handler.NewCompetitionHandler(compSvc)
+	compH := handler.NewCompetitionHandler(compSvc, teamResolver)
 
 	// 创建 chi 路由器并挂载全局中间件
 	r := chi.NewRouter()

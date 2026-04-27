@@ -47,7 +47,7 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/leaderboard", p.listByComp)
 }
 
-// challengeResult 表示用户在某道题目上的解题结果。
+// challengeResult 表示用户/队伍在某道题目上的解题结果。
 type challengeResult struct {
 	ChallengeID string    `json:"challenge_id"`         // 题目 res_id
 	Solved      bool      `json:"solved"`               // 是否解出
@@ -55,17 +55,18 @@ type challengeResult struct {
 	SolvedAt    time.Time `json:"solved_at,omitempty"`  // 解题时间
 }
 
-// entry 是排行榜中的一条记录，表示一个用户的排名信息。
+// entry 是排行榜中的一条记录，表示一个用户或队伍的排名信息。
 type entry struct {
 	Rank          int               `json:"rank"`            // 排名（从 1 开始）
-	UserID        string            `json:"user_id"`         // 用户 ID
+	UserID        string            `json:"user_id,omitempty"` // 用户 ID（个人模式）
+	TeamID        string            `json:"team_id,omitempty"` // 队伍 ID（队伍模式）
 	TotalScore    int               `json:"total_score"`     // 总得分
 	LastSolveTime time.Time         `json:"last_solve_time"` // 最后一次正确提交的时间
 	Challenges    []challengeResult `json:"challenges"`      // 逐题解题详情
 }
 
 // listByComp 处理获取比赛排行榜的请求。
-// 返回每个用户的排名、总分、最后解题时间，以及每道题的解题状态和一二三血信息。
+// 返回每个用户/队伍的排名、总分、最后解题时间，以及每道题的解题状态和一二三血信息。
 func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	compID := chi.URLParam(r, "id")
 	if err := pluginutil.ParseID(compID); err != nil {
@@ -73,6 +74,16 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+
+	// 0. 获取比赛模式
+	var mode string
+	err := p.db.QueryRowContext(ctx, `
+		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
+	`, compID).Scan(&mode)
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
 
 	// 1. 获取比赛所有题目 ID（通过共享查询函数获取完整信息，再提取 ID）
 	challenges, err := pluginutil.GetCompChallenges(ctx, p.db, compID)
@@ -85,53 +96,88 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		chalIDs = append(chalIDs, c.ResID)
 	}
 
-	// 2. 查询所有正确提交
-	solves, err := pluginutil.GetCorrectSubmissions(ctx, p.db, compID)
-	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
-	}
+	// 2. 查询所有正确提交（根据模式选择用户或队伍）
+	var entitySolves map[string]map[string]time.Time
+	var entityIDs []string
+	var totalScores map[string]int
+	var bloodRank map[string]int
 
-	userSolves := make(map[string]map[string]time.Time)
-	var userIDs []string
-	for _, fs := range solves {
-		if userSolves[fs.UserID] == nil {
-			userSolves[fs.UserID] = make(map[string]time.Time)
-			userIDs = append(userIDs, fs.UserID)
+	if mode == "team" {
+		// 队伍模式
+		solves, err := pluginutil.GetTeamCorrectSubmissions(ctx, p.db, compID)
+		if err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+			return
 		}
-		userSolves[fs.UserID][fs.ChallengeID] = fs.SolvedAt
-	}
+		teamSolves := make(map[string]map[string]time.Time)
+		for _, fs := range solves {
+			if teamSolves[fs.TeamID] == nil {
+				teamSolves[fs.TeamID] = make(map[string]time.Time)
+				entityIDs = append(entityIDs, fs.TeamID)
+			}
+			teamSolves[fs.TeamID][fs.ChallengeID] = fs.SolvedAt
+		}
+		entitySolves = teamSolves
 
-	// 3. 通过 TopThreeProvider 接口获取一二三血排名
-	bloodRank := make(map[string]int)
-	if p.topThree != nil {
-		topThreeMap, err := p.topThree.GetCompTopThree(ctx, compID)
-		if err == nil {
-			for chalID, entry := range topThreeMap {
-				if entry.FirstBlood != "" {
-					bloodRank[entry.FirstBlood+":"+chalID] = 1
-				}
-				if entry.SecondBlood != "" {
-					bloodRank[entry.SecondBlood+":"+chalID] = 2
-				}
-				if entry.ThirdBlood != "" {
-					bloodRank[entry.ThirdBlood+":"+chalID] = 3
+		// 计算队伍总分
+		totalScores, err = pluginutil.GetTeamScores(ctx, p.db, compID)
+		if err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+
+		// 3. 通过 TopThreeProvider 接口获取一二三血排名（队伍模式）
+		bloodRank = make(map[string]int)
+		// 暂时在队伍模式下不处理 bloodRank，因为 GetCompTopThree 返回的是用户 ID
+		// 以后可以通过查询 topthree_records 表直接获取队伍模式的 bloodRank
+	} else {
+		// 个人模式（默认）
+		solves, err := pluginutil.GetCorrectSubmissions(ctx, p.db, compID)
+		if err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+		userSolves := make(map[string]map[string]time.Time)
+		for _, fs := range solves {
+			if userSolves[fs.UserID] == nil {
+				userSolves[fs.UserID] = make(map[string]time.Time)
+				entityIDs = append(entityIDs, fs.UserID)
+			}
+			userSolves[fs.UserID][fs.ChallengeID] = fs.SolvedAt
+		}
+		entitySolves = userSolves
+
+		// 计算用户总分
+		totalScores, err = pluginutil.GetUserScores(ctx, p.db, compID)
+		if err != nil {
+			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+
+		// 3. 通过 TopThreeProvider 接口获取一二三血排名（个人模式）
+		bloodRank = make(map[string]int)
+		if p.topThree != nil {
+			topThreeMap, err := p.topThree.GetCompTopThree(ctx, compID)
+			if err == nil {
+				for chalID, entry := range topThreeMap {
+					if entry.FirstBlood != "" {
+						bloodRank[entry.FirstBlood+":"+chalID] = 1
+					}
+					if entry.SecondBlood != "" {
+						bloodRank[entry.SecondBlood+":"+chalID] = 2
+					}
+					if entry.ThirdBlood != "" {
+						bloodRank[entry.ThirdBlood+":"+chalID] = 3
+					}
 				}
 			}
 		}
 	}
 
-	// 4. 计算总分
-	totalScores, err := pluginutil.GetUserScores(ctx, p.db, compID)
-	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
-	}
-
-	// 5. 组装排行榜
+	// 4. 组装排行榜
 	var board []entry
-	for _, uid := range userIDs {
-		solvedMap := userSolves[uid]
+	for _, eid := range entityIDs {
+		solvedMap := entitySolves[eid]
 		var lastSolveAt time.Time
 		results := make([]challengeResult, 0, len(chalIDs))
 
@@ -140,7 +186,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 			if solvedAt, ok := solvedMap[chalID]; ok {
 				cr.Solved = true
 				cr.SolvedAt = solvedAt
-				if br, hasBr := bloodRank[uid+":"+chalID]; hasBr {
+				if br, hasBr := bloodRank[eid+":"+chalID]; hasBr {
 					cr.BloodRank = br
 				}
 				if solvedAt.After(lastSolveAt) {
@@ -150,12 +196,17 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 			results = append(results, cr)
 		}
 
-		board = append(board, entry{
-			UserID:        uid,
-			TotalScore:    totalScores[uid],
+		e := entry{
+			TotalScore:    totalScores[eid],
 			LastSolveTime: lastSolveAt,
 			Challenges:    results,
-		})
+		}
+		if mode == "team" {
+			e.TeamID = eid
+		} else {
+			e.UserID = eid
+		}
+		board = append(board, e)
 	}
 
 	sort.Slice(board, func(i, j int) bool {
