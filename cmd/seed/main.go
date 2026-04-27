@@ -23,13 +23,14 @@ const (
 	poolSize     = 50 // 题目池大小
 	chalsPerComp = 25 // 每个比赛分配的题目数量
 	usersPerComp = 30 // 每个比赛的模拟用户数量
+	teamsPerComp = 10 // 每个比赛的队伍数量（队伍模式）
 
 	// submitDelay 是每个用户两次提交之间的间隔。
 	// 提交端点限流为每用户 3 次/10 秒，4 秒间隔确保不触发限流。
 	submitDelay = 4 * time.Second
 )
 
-// solveCounts 定义每个用户的正确解题数。
+// solveCounts 定义每个用户的正确解题数量。
 // solveCounts[i] 表示第 i 个用户（0=最强）的正确解题数。
 // User 0 → 18/25 = 72%；User 29 → 1/25 = 4%。
 // 低排名处故意制造并列，模拟真实的排行榜动态。
@@ -221,14 +222,14 @@ func postJSON(url string, body any, token string) map[string]any {
 	return m
 }
 
-// registerAndLogin 注册用户并返回 JWT token。
-// 如果用户已存在（409），直接登录。
-func registerAndLogin(username, password string) string {
+// registerAndLogin 注册用户并返回 JWT token 和用户 ID。
+// 如果用户已存在（409），直接登录（登录时无法获取用户ID，返回空字符串）。
+func registerAndLogin(username, password string) (token string, userID string) {
 	return registerAndLoginWithRole(username, password, "")
 }
 
-// registerAndLoginWithRole 注册指定角色的用户并返回 JWT token。
-func registerAndLoginWithRole(username, password, role string) string {
+// registerAndLoginWithRole 注册指定角色的用户并返回 JWT token 和用户 ID。
+func registerAndLoginWithRole(username, password, role string) (token string, userID string) {
 	payload := map[string]string{"username": username, "password": password}
 	if role != "" {
 		payload["role"] = role
@@ -241,17 +242,30 @@ func registerAndLoginWithRole(username, password, role string) string {
 		log.Fatalf("register %s: %v", username, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == 201 {
+		// 用户创建成功，从响应中获取用户ID
+		var regResp map[string]any
+		regData, _ := io.ReadAll(resp.Body)
+		json.Unmarshal(regData, &regResp)
+		userID, _ = regResp["id"].(string)
+		// 然后登录获取token
+		token, _ = login(username, password)
+		return token, userID
+	}
+
 	if resp.StatusCode == 409 {
+		// 用户已存在，直接登录
 		return login(username, password)
 	}
-	if resp.StatusCode != 201 {
-		data, _ := io.ReadAll(resp.Body)
-		log.Fatalf("register %s: status %d: %s", username, resp.StatusCode, data)
-	}
-	return login(username, password)
+
+	// 其他错误
+	data, _ := io.ReadAll(resp.Body)
+	log.Fatalf("register %s: status %d: %s", username, resp.StatusCode, data)
+	return "", ""
 }
 
-func login(username, password string) string {
+func login(username, password string) (token string, userID string) {
 	m := postJSON(authURL()+"/api/v1/login", map[string]string{
 		"username": username,
 		"password": password,
@@ -260,13 +274,14 @@ func login(username, password string) string {
 	if !ok {
 		log.Fatalf("login %s: no token in response", username)
 	}
-	return tok
+	// 登录响应不包含用户ID，返回空字符串
+	return tok, ""
 }
 
 // ── API 调用函数 ──
 
 func apiCreateChallenge(token, title, category, desc string, score int, flag string) string {
-	m := postJSON(ctfURL()+"/api/v1/admin/challenges", map[string]any{
+	m := postJSON(ctfURL()+"/api/v1/challenges", map[string]any{
 		"title": title, "category": category, "description": desc,
 		"score": score, "flag": flag,
 	}, token)
@@ -277,12 +292,19 @@ func apiCreateChallenge(token, title, category, desc string, score int, flag str
 	return id
 }
 
-func apiCreateCompetition(token, title, desc string, start, end time.Time) string {
-	m := postJSON(ctfURL()+"/api/v1/admin/competitions", map[string]any{
+func apiCreateCompetition(token, title, desc string, start, end time.Time, mode, teamJoinMode string) string {
+	payload := map[string]any{
 		"title": title, "description": desc,
 		"start_time": start.Format(time.RFC3339),
 		"end_time":   end.Format(time.RFC3339),
-	}, token)
+	}
+	if mode != "" {
+		payload["mode"] = mode
+	}
+	if teamJoinMode != "" {
+		payload["team_join_mode"] = teamJoinMode
+	}
+	m := postJSON(ctfURL()+"/api/v1/competitions", payload, token)
 	id, ok := m["id"].(string)
 	if !ok {
 		log.Fatalf("create competition: no id: %v", m)
@@ -291,16 +313,35 @@ func apiCreateCompetition(token, title, desc string, start, end time.Time) strin
 }
 
 func apiAddChallengeToComp(token, compID, chalID string) {
-	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/challenges",
+	postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/challenges",
 		map[string]string{"challenge_id": chalID}, token)
 }
 
 func apiStartComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/competitions/"+compID+"/start", token)
 }
 
 func apiEndComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/competitions/"+compID+"/end", token)
+}
+
+func apiCreateTeam(token, name string) string {
+	m := postJSON(authURL()+"/api/v1/admin/teams", map[string]string{"name": name}, token)
+	id, ok := m["id"].(string)
+	if !ok {
+		log.Fatalf("create team: no id: %v", m)
+	}
+	return id
+}
+
+func apiAddTeamMember(token, teamID, userID string) {
+	postJSON(authURL()+"/api/v1/admin/teams/"+teamID+"/members",
+		map[string]string{"user_id": userID}, token)
+}
+
+func apiAddTeamToComp(token, compID, teamID string) {
+	postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/teams",
+		map[string]string{"team_id": teamID}, token)
 }
 
 // postJSONIgnore409 发送 POST 请求，容忍 409（已处于目标状态）。
@@ -327,8 +368,8 @@ func postJSONIgnore409(url string, token string) {
 }
 
 func apiSubmitFlag(token, compID, chalID, flag string) map[string]any {
-	return postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/challenges/"+chalID+"/submit",
-		map[string]string{"flag": flag}, token)
+	return postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/submit",
+		map[string]string{"challenge_id": chalID, "flag": flag}, token)
 }
 
 // ── 随机选取 ──
@@ -338,6 +379,31 @@ func pickN(rng *rand.Rand, ids []string, n int) []string {
 	copy(s, ids)
 	rng.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] })
 	return s[:n]
+}
+
+// ── 比赛模式类型 ──
+
+type compMode string
+
+const (
+	modeIndividual compMode = "individual"
+	modeTeamFree   compMode = "team"
+	modeTeamAdmin  compMode = "team"
+)
+
+// getCompMode 根据比赛索引返回比赛模式
+// 0-4: individual（个人模式）
+// 5-9: team + free（队伍模式，自由加入）
+// 10-14: team + admin（队伍模式，管理员添加）
+func getCompMode(i int) (mode compMode, teamJoinMode string) {
+	switch {
+	case i < 5:
+		return modeIndividual, ""
+	case i < 10:
+		return modeTeamFree, "free"
+	default:
+		return modeTeamAdmin, "admin"
+	}
 }
 
 // ── 用户提交任务（并发执行） ──
@@ -358,7 +424,7 @@ func (j *userJob) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	username := fmt.Sprintf("comp%02d_player_%03d", j.CompIdx+1, j.UserIdx+1)
-	userToken := registerAndLogin(username, "password123")
+	userToken, _ := registerAndLogin(username, "password123")
 
 	nCorrect := solveCounts[j.UserIdx]
 
@@ -386,6 +452,86 @@ func (j *userJob) run(wg *sync.WaitGroup) {
 	}
 }
 
+// teamJob 是队伍在比赛中的提交任务。
+type teamJob struct {
+	CompIdx int              // 比赛序号
+	TeamIdx int              // 队伍序号（0=最强）
+	CompID  string           // 比赛 res_id
+	ChalIDs []string         // 分配到该比赛的题目
+	Flags   map[string]string // res_id → flag
+	RNG     *rand.Rand       // 每个队伍独立的随机数生成器
+}
+
+// run 为队伍创建用户、分配到队伍、按团队能力提交 flag。
+func (j *teamJob) run(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	teamName := fmt.Sprintf("comp%02d_team_%02d", j.CompIdx+1, j.TeamIdx+1)
+	teamSize := 3 + j.RNG.Intn(3) // 每队 3-5 人
+
+	// 注册 admin 用户获取 token 用于创建队伍
+	adminToken, _ := registerAndLoginWithRole("seed_admin", "seed_admin_password", "admin")
+
+	// 创建队伍
+	teamID := apiCreateTeam(adminToken, teamName)
+
+	// 队伍解决的题目数量（根据队伍序号，0队最强）
+	nTeamCorrect := solveCounts[j.TeamIdx]
+
+	// 注册并分配队员
+	userTokens := make([]string, 0, teamSize)
+	for u := 0; u < teamSize; u++ {
+		userIdx := j.TeamIdx*teamSize + u
+		if userIdx >= usersPerComp {
+			userIdx = usersPerComp - 1
+		}
+		username := fmt.Sprintf("comp%02d_player_%03d", j.CompIdx+1, userIdx+1)
+		token, userID := registerAndLogin(username, "password123")
+		userTokens = append(userTokens, token)
+
+		// 将用户添加到队伍（如果我们有用户ID的话）
+		if userID != "" {
+			apiAddTeamMember(adminToken, teamID, userID)
+		}
+	}
+
+	if len(userTokens) == 0 {
+		return
+	}
+
+	// 打乱题目
+	picked := make([]string, len(j.ChalIDs))
+	copy(picked, j.ChalIDs)
+	j.RNG.Shuffle(len(picked), func(i, k int) { picked[i], picked[k] = picked[k], picked[i] })
+
+	correct := picked[:nTeamCorrect]
+	rest := picked[nTeamCorrect:]
+
+	// 由不同队员提交正确答案，模拟团队协作
+	for idx, cid := range correct {
+		userIdx := idx % len(userTokens)
+		token := userTokens[userIdx]
+
+		// 30% 概率先有一次错误尝试
+		if j.RNG.Float64() < 0.3 {
+			wrongUserIdx := (userIdx + 1) % len(userTokens)
+			apiSubmitFlag(userTokens[wrongUserIdx], j.CompID, cid, "flag{wrong_attempt}")
+			time.Sleep(submitDelay)
+		}
+
+		apiSubmitFlag(token, j.CompID, cid, j.Flags[cid])
+		time.Sleep(submitDelay)
+	}
+
+	// 未解对的题目：0-2 次错误尝试，由随机队员提交
+	numWrongAttempts := j.RNG.Intn(3)
+	for i := 0; i < numWrongAttempts && i < len(rest); i++ {
+		userIdx := (i + 1) % len(userTokens)
+		apiSubmitFlag(userTokens[userIdx], j.CompID, rest[i], "flag{wrong_attempt}")
+		time.Sleep(submitDelay)
+	}
+}
+
 // ── main ──
 
 func main() {
@@ -397,7 +543,7 @@ func main() {
 
 	// 注册 admin 用户并获取 token
 	log.Println("registering admin user...")
-	adminToken := registerAndLoginWithRole("seed_admin", "seed_admin_password", "admin")
+	adminToken, _ := registerAndLoginWithRole("seed_admin", "seed_admin_password", "admin")
 
 	// 创建 50 道题目
 	log.Println("creating challenges...")
@@ -445,31 +591,83 @@ func main() {
 			end = start.Add(48 * time.Hour)
 		}
 
+		mode, teamJoinMode := getCompMode(i)
+		var modeStr, teamJoinModeStr string
+		if mode != modeIndividual {
+			modeStr = string(mode)
+			teamJoinModeStr = teamJoinMode
+		}
+
 		compID := apiCreateCompetition(adminToken,
 			compTitles[i%len(compTitles)],
 			compDescs[i%len(compDescs)],
-			start, end)
+			start, end, modeStr, teamJoinModeStr)
 
 		picked := pickN(rng, chalIDs, chalsPerComp)
 		for _, cid := range picked {
 			apiAddChallengeToComp(adminToken, compID, cid)
 		}
-		apiStartComp(adminToken, compID)
-		log.Printf("competition %02d  id=%s  started", i+1, compID)
 
-		// 并发启动所有用户提交任务
-		var wg sync.WaitGroup
-		for u := 0; u < usersPerComp; u++ {
-			wg.Add(1)
-			job := &userJob{
-				CompIdx: i,
-				UserIdx: u,
-				CompID:  compID,
-				ChalIDs: picked,
-				Flags:   chalFlags,
-				RNG:     rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(u))),
+		var teamIDs []string
+		if mode != modeIndividual {
+			// 队伍模式：创建队伍
+			log.Printf("competition %02d: creating %d teams...", i+1, teamsPerComp)
+			for t := 0; t < teamsPerComp; t++ {
+				teamName := fmt.Sprintf("comp%02d_team_%02d", i+1, t+1)
+				teamID := apiCreateTeam(adminToken, teamName)
+				teamIDs = append(teamIDs, teamID)
+
+				// 如果是 admin 加入模式，将队伍添加到比赛
+				if teamJoinMode == "admin" {
+					apiAddTeamToComp(adminToken, compID, teamID)
+				}
 			}
-			go job.run(&wg)
+		}
+
+		apiStartComp(adminToken, compID)
+		log.Printf("competition %02d  id=%s  mode=%s  team_join=%s  started",
+			i+1, compID, func() string {
+				if mode == modeIndividual {
+					return "individual"
+				}
+				return "team"
+			}(), func() string {
+				if teamJoinMode == "" {
+					return "-"
+				}
+				return teamJoinMode
+			}())
+
+		// 并发启动提交任务
+		var wg sync.WaitGroup
+		if mode == modeIndividual {
+			// 个人模式：每个用户独立提交
+			for u := 0; u < usersPerComp; u++ {
+				wg.Add(1)
+				job := &userJob{
+					CompIdx: i,
+					UserIdx: u,
+					CompID:  compID,
+					ChalIDs: picked,
+					Flags:   chalFlags,
+					RNG:     rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(u))),
+				}
+				go job.run(&wg)
+			}
+		} else {
+			// 队伍模式：每个队伍作为一个整体提交
+			for t := 0; t < teamsPerComp; t++ {
+				wg.Add(1)
+				job := &teamJob{
+					CompIdx: i,
+					TeamIdx: t,
+					CompID:  compID,
+					ChalIDs: picked,
+					Flags:   chalFlags,
+					RNG:     rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(t))),
+				}
+				go job.run(&wg)
+			}
 		}
 		wg.Wait()
 
