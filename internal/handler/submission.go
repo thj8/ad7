@@ -56,6 +56,10 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "challenge not found")
 		return
 	}
+	if err == service.ErrCompetitionNotActive {
+		writeError(w, http.StatusBadRequest, "competition is not active")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

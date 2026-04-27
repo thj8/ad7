@@ -1090,3 +1090,105 @@ func TestAnalyticsChallenges(t *testing.T) {
 		t.Fatalf("expected 1 challenge stat, got %d", len(chals))
 	}
 }
+
+func TestSubmitInInactiveCompetition(t *testing.T) {
+	testutil.Cleanup(t, env.DB)
+	adminTok := testutil.MakeToken("admin1", "admin")
+	userTok := testutil.MakeToken("user1", "user")
+
+	// Create competition with start time in future (not active yet)
+	resp := testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Future Comp","description":"D","start_time":"2100-01-01T00:00:00Z","end_time":"2100-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Create challenge and add to comp
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/challenges",
+		`{"title":"InactiveChal","description":"D","score":200,"flag":"flag{inactive}"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	chalID := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	submitPath := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID, chalID)
+
+	// Test 1: Submit to future competition (not active)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath, `{"flag":"flag{inactive}"}`, userTok)
+	testutil.AssertStatus(t, resp, 400)
+	resp.Body.Close()
+
+	// Test 2: Create competition with end time in past
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Past Comp","description":"D","start_time":"2000-01-01T00:00:00Z","end_time":"2000-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID2 := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Add same challenge
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID2),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Submit to past competition
+	submitPath2 := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID2, chalID)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath2, `{"flag":"flag{inactive}"}`, userTok)
+	testutil.AssertStatus(t, resp, 400)
+	resp.Body.Close()
+
+	// Test 3: Create competition, manually end it, then try to submit
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Ended Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID3 := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Add challenge
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID3),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// Manually end competition
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/end", compID3), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Try to submit
+	submitPath3 := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID3, chalID)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath3, `{"flag":"flag{inactive}"}`, userTok)
+	testutil.AssertStatus(t, resp, 400)
+	resp.Body.Close()
+
+	// Test 4: Create competition, end it, start it again, then submit should work
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", "/api/v1/admin/competitions",
+		`{"title":"Restarted Comp","description":"D","start_time":"2026-01-01T00:00:00Z","end_time":"2026-12-31T23:59:59Z"}`, adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	compID4 := testutil.GetID(t, testutil.DecodeJSON(t, resp))
+
+	// Add challenge
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/challenges", compID4),
+		fmt.Sprintf(`{"challenge_id":"%s"}`, chalID), adminTok)
+	testutil.AssertStatus(t, resp, 201)
+	resp.Body.Close()
+
+	// End competition
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/end", compID4), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Start competition again
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", fmt.Sprintf("/api/v1/admin/competitions/%s/start", compID4), "", adminTok)
+	testutil.AssertStatus(t, resp, 200)
+	resp.Body.Close()
+
+	// Submit should now work
+	submitPath4 := fmt.Sprintf("/api/v1/competitions/%s/challenges/%s/submit", compID4, chalID)
+	resp = testutil.DoRequest(t, env.Server.URL, "POST", submitPath4, `{"flag":"flag{inactive}"}`, userTok)
+	testutil.AssertStatus(t, resp, 200)
+	b := testutil.DecodeJSON(t, resp)
+	if b["success"] != true {
+		t.Fatalf("expected success=true after restarting competition, got %v", b["success"])
+	}
+}

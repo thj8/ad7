@@ -14,6 +14,7 @@ import (
 
 // ErrConflict 表示操作冲突（如重复开始/结束比赛）。
 var ErrConflict = errors.New("conflict")
+var ErrCompetitionNotActive = errors.New("competition is not active")
 
 // ErrMustJoinTeam 表示必须先加入队伍才能参加。
 var ErrMustJoinTeam = errors.New("must join a team to participate")

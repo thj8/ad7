@@ -57,6 +57,7 @@ type SubmitInCompRequest struct {
 //  6. 创建提交记录（包含 team_id，如果是队伍模式）
 //  7. 如果正确，发布事件通知（供插件消费）
 func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompRequest) (SubmitResult, error) {
+	// ========== 步骤 1：验证比赛信息 ==========
 	comp, err := s.competitions.GetCompetitionByID(ctx, req.CompetitionID)
 	if err != nil {
 		return "", err
@@ -64,9 +65,16 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 	if comp == nil {
 		return "", ErrNotFound
 	}
+	// 检查比赛是否在激活状态（IsActive 已包含时间范围检查）
+	if !comp.IsActive {
+		return "", ErrCompetitionNotActive
+	}
 
+	// ========== 步骤 2：检查用户/队伍是否已解决该题 ==========
 	var teamID string
 	if comp.Mode == model.CompetitionModeTeam {
+		// ---------- 队伍模式分支 ----------
+		// 获取用户所在队伍
 		teamID, err = s.teamResolver.GetUserTeam(ctx, req.UserID)
 		if err != nil {
 			return "", err
@@ -74,6 +82,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		if teamID == "" {
 			return "", ErrMustJoinTeam
 		}
+		// 管理模式下检查队伍是否已注册到该比赛
 		if comp.TeamJoinMode == model.TeamJoinModeManaged {
 			inComp, err := s.competitions.IsTeamInComp(ctx, req.CompetitionID, teamID)
 			if err != nil {
@@ -83,6 +92,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 				return "", ErrTeamNotRegistered
 			}
 		}
+		// 检查队伍是否已正确提交过此题（队伍模式下同一题目只计一次）
 		solved, err := s.submissions.HasTeamCorrectSubmission(ctx, teamID, req.ChallengeID, req.CompetitionID)
 		if err != nil {
 			return "", err
@@ -92,6 +102,8 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 			return ResultAlreadySolved, nil
 		}
 	} else {
+		// ---------- 个人模式分支 ----------
+		// 检查用户是否已正确提交过此题
 		solved, err := s.submissions.HasCorrectSubmission(ctx, req.UserID, req.ChallengeID, req.CompetitionID)
 		if err != nil {
 			return "", err
@@ -102,6 +114,7 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		}
 	}
 
+	// ========== 步骤 3：验证题目信息 ==========
 	challenge, err := s.challenges.GetEnabledByID(ctx, req.ChallengeID)
 	if err != nil {
 		return "", err
@@ -110,7 +123,9 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		return "", ErrNotFound
 	}
 
+	// ========== 步骤 4：验证 Flag 并记录提交 ==========
 	isCorrect := challenge.Flag == req.Flag
+	// 创建提交记录（无论对错都记录，用于后续分析）
 	if err := s.submissions.CreateSubmission(ctx, &model.Submission{
 		UserID:        req.UserID,
 		TeamID:        teamID,
@@ -122,7 +137,9 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 		return "", err
 	}
 
+	// ========== 步骤 5：正确提交后处理 ==========
 	if isCorrect {
+		// 发布正确提交事件，供插件（排行榜、一血、通知等）消费
 		event.Publish(event.Event{
 			Type:          event.EventCorrectSubmission,
 			UserID:        req.UserID,
