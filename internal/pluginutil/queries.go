@@ -588,3 +588,61 @@ func getChallengeAvgSolveTime(ctx context.Context, db DBTX, compID, challengeID 
 	}
 	return 0, nil
 }
+
+// TeamFullStat 队伍完整统计信息
+type TeamFullStat struct {
+	TeamID         string
+	TotalSolves    int
+	TotalScore     int
+	TotalAttempts  int
+	FirstSolveAt   *time.Time
+	LastSolveAt    *time.Time
+}
+
+// GetTeamFullStats 获取比赛中所有队伍的完整统计信息
+func GetTeamFullStats(ctx context.Context, db DBTX, compID string) ([]TeamFullStat, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			s.team_id,
+			SUM(CASE WHEN s.is_correct = 1 THEN 1 ELSE 0 END) as total_solves,
+			SUM(CASE WHEN s.is_correct = 1 THEN c.score ELSE 0 END) as total_score,
+			COUNT(*) as total_attempts,
+			MIN(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as first_solve,
+			MAX(CASE WHEN s.is_correct = 1 THEN s.created_at ELSE NULL END) as last_solve
+		FROM submissions s
+		LEFT JOIN challenges c ON c.res_id = s.challenge_id AND c.is_deleted = 0
+		WHERE s.competition_id = ? AND s.is_deleted = 0 AND s.team_id != ''
+		GROUP BY s.team_id
+		ORDER BY total_score DESC, first_solve ASC
+	`, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []TeamFullStat
+	for rows.Next() {
+		var t TeamFullStat
+		var firstSolve, lastSolve sql.NullTime
+		if err := rows.Scan(&t.TeamID, &t.TotalSolves, &t.TotalScore, &t.TotalAttempts, &firstSolve, &lastSolve); err != nil {
+			return nil, err
+		}
+		if firstSolve.Valid {
+			t.FirstSolveAt = &firstSolve.Time
+		}
+		if lastSolve.Valid {
+			t.LastSolveAt = &lastSolve.Time
+		}
+		stats = append(stats, t)
+	}
+	return stats, rows.Err()
+}
+
+// GetCompDistinctTeams 获取比赛中有提交记录的独立队伍数
+func GetCompDistinctTeams(ctx context.Context, db DBTX, compID string) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT team_id) FROM submissions WHERE competition_id = ? AND is_deleted = 0 AND team_id != ''
+	`, compID).Scan(&count)
+	return count, err
+}
