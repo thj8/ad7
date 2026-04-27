@@ -134,30 +134,46 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(auth.Authenticate)
 		r.Get("/challenges", challengeH.List)
-		r.Get("/challenges/{id}", challengeH.Get)
+		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			Get("/challenges/{id}", challengeH.Get)
 		r.Get("/competitions", compH.List)
-		r.Get("/competitions/{id}", compH.Get)
-		r.Get("/competitions/{id}/challenges", compH.ListChallenges)
+		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			Get("/competitions/{id}", compH.Get)
+		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			Get("/competitions/{id}/challenges", compH.ListChallenges)
 		r.With(
 			middleware.LimitByUserID(
 				cfg.RateLimit.Submission.Requests,
 				cfg.RateLimit.Submission.Window,
 			),
+			middleware.ValidateURLParam("comp_id", middleware.CtxKeyCompID),
+			middleware.ValidateURLParam("id", middleware.CtxKeyChalID),
 		).Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Post("/challenges", challengeH.Create)
-			r.Put("/challenges/{id}", challengeH.Update)
-			r.Delete("/challenges/{id}", challengeH.Delete)
-			r.Get("/competitions/{id}/submissions", submissionH.ListByComp)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Put("/challenges/{id}", challengeH.Update)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Delete("/challenges/{id}", challengeH.Delete)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Get("/competitions/{id}/submissions", submissionH.ListByComp)
 			r.Post("/competitions", compH.Create)
 			r.Get("/competitions", compH.ListAll)
-			r.Put("/competitions/{id}", compH.Update)
-			r.Delete("/competitions/{id}", compH.Delete)
-			r.Post("/competitions/{id}/challenges", compH.AddChallenge)
-			r.Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
-			r.Post("/competitions/{id}/start", compH.Start)
-			r.Post("/competitions/{id}/end", compH.End)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Put("/competitions/{id}", compH.Update)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Delete("/competitions/{id}", compH.Delete)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Post("/competitions/{id}/challenges", compH.AddChallenge)
+			r.With(
+				middleware.ValidateURLParam("id", middleware.CtxKeyID),
+				middleware.ValidateURLParam("challenge_id", middleware.CtxKeyChalID),
+			).Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Post("/competitions/{id}/start", compH.Start)
+			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+				Post("/competitions/{id}/end", compH.End)
 		})
 	})
 

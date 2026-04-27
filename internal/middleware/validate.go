@@ -43,26 +43,38 @@ func ValidateURLParam(paramName string, ctxKey ctxKey) func(http.Handler) http.H
 // 必须在使用 ValidateURLParam("id", CtxKeyCompID) 或
 // ValidateURLParam("comp_id", CtxKeyCompID) 的路由中调用。
 func CompID(r *http.Request) string {
-	return r.Context().Value(CtxKeyCompID).(string)
+	if v := r.Context().Value(CtxKeyCompID); v != nil {
+		return v.(string)
+	}
+	panic("CompID called without ValidateURLParam middleware for comp_id")
 }
 
 // ChalID 从 Context 中获取题目 ID。
 // 必须在使用 ValidateURLParam("id", CtxKeyChalID) 或
 // ValidateURLParam("challenge_id", CtxKeyChalID) 的路由中调用。
 func ChalID(r *http.Request) string {
-	return r.Context().Value(CtxKeyChalID).(string)
+	if v := r.Context().Value(CtxKeyChalID); v != nil {
+		return v.(string)
+	}
+	panic("ChalID called without ValidateURLParam middleware for chal_id")
 }
 
 // TeamID 从 Context 中获取队伍 ID。
 // 必须在使用 ValidateURLParam("team_id", CtxKeyTeamID) 的路由中调用。
 func TeamID(r *http.Request) string {
-	return r.Context().Value(CtxKeyTeamID).(string)
+	if v := r.Context().Value(CtxKeyTeamID); v != nil {
+		return v.(string)
+	}
+	panic("TeamID called without ValidateURLParam middleware for team_id")
 }
 
 // ID 从 Context 中获取通用 ID（单参数路由）。
 // 必须在使用 ValidateURLParam("id", CtxKeyID) 的路由中调用。
 func ID(r *http.Request) string {
-	return r.Context().Value(CtxKeyID).(string)
+	if v := r.Context().Value(CtxKeyID); v != nil {
+		return v.(string)
+	}
+	panic("ID called without ValidateURLParam middleware for id")
 }
 
 // writeError 是 handler 包 writeError 的简化版，避免循环导入。

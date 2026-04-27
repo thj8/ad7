@@ -88,8 +88,8 @@ func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Comp
 // Create 创建新比赛。执行以下业务规则：
 //   - title 为必填字段
 //   - end_time 必须晚于 start_time
-//   - mode 必须是 individual 或 team
-//   - team_join_mode 必须是 free 或 managed
+//   - mode 必须是 individual 或 team（默认为 individual）
+//   - team_join_mode 必须是 free 或 managed（默认为 free）
 //   - 新建比赛默认激活（is_active = true）
 //
 // 返回新生成比赛的 res_id。
@@ -97,6 +97,13 @@ func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (
 	// 验证必填字段
 	if c.Title == "" {
 		return "", errors.New("title is required")
+	}
+	// 设置默认模式
+	if c.Mode == "" {
+		c.Mode = model.CompetitionModeIndividual
+	}
+	if c.TeamJoinMode == "" {
+		c.TeamJoinMode = model.TeamJoinModeFree
 	}
 	// 验证时间合法性
 	if c.EndTime.Before(c.StartTime) {
