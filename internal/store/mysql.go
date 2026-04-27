@@ -148,18 +148,27 @@ func (s *Store) HasCorrectSubmission(ctx context.Context, userID string, challen
 func (s *Store) CreateSubmission(ctx context.Context, sub *model.Submission) error {
 	sub.ResID = uuid.Next()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO submissions (res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?)`,
-		sub.ResID, sub.UserID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
+		`INSERT INTO submissions (res_id, user_id, team_id, challenge_id, competition_id, submitted_flag, is_correct) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sub.ResID, sub.UserID, sub.TeamID, sub.ChallengeID, sub.CompetitionID, sub.SubmittedFlag, sub.IsCorrect)
 	if err != nil {
 		return fmt.Errorf("create submission for user %s, challenge %s: %w", sub.UserID, sub.ChallengeID, err)
 	}
 	return nil
 }
 
+// HasTeamCorrectSubmission 检查指定队伍在指定比赛中是否已正确提交过某道题目。
+// 用于防止重复提交，competitionID 为必填参数。
+func (s *Store) HasTeamCorrectSubmission(ctx context.Context, teamID string, challengeID string, competitionID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM submissions WHERE team_id=? AND challenge_id=? AND competition_id=? AND is_correct=1 AND is_deleted=0`
+	var count int
+	err := s.db.QueryRowContext(ctx, query, teamID, challengeID, competitionID).Scan(&count)
+	return count > 0, err
+}
+
 // ListSubmissions 根据 params 查询提交记录。
 // 按创建时间倒序排列。动态拼接 SQL 条件。
 func (s *Store) ListSubmissions(ctx context.Context, params ListSubmissionsParams) ([]model.Submission, error) {
-	query := `SELECT res_id, user_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE is_deleted=0`
+	query := `SELECT res_id, user_id, team_id, challenge_id, competition_id, submitted_flag, is_correct, created_at FROM submissions WHERE is_deleted=0`
 	args := []any{}
 	if params.CompetitionID != "" {
 		query += " AND competition_id=?"
@@ -182,7 +191,7 @@ func (s *Store) ListSubmissions(ctx context.Context, params ListSubmissionsParam
 	var subs []model.Submission
 	for rows.Next() {
 		var sub model.Submission
-		if err := rows.Scan(&sub.ResID, &sub.UserID, &sub.ChallengeID, &sub.CompetitionID,
+		if err := rows.Scan(&sub.ResID, &sub.UserID, &sub.TeamID, &sub.ChallengeID, &sub.CompetitionID,
 			&sub.SubmittedFlag, &sub.IsCorrect, &sub.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -197,7 +206,7 @@ func (s *Store) ListSubmissions(ctx context.Context, params ListSubmissionsParam
 // 管理员接口，包含未激活的比赛。
 func (s *Store) ListCompetitions(ctx context.Context) ([]model.Competition, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
+		`SELECT res_id, title, description, start_time, end_time, is_active, mode, team_join_mode, created_at, updated_at
 		 FROM competitions WHERE is_deleted = 0 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -206,7 +215,8 @@ func (s *Store) ListCompetitions(ctx context.Context) ([]model.Competition, erro
 	var cs []model.Competition
 	for rows.Next() {
 		var c model.Competition
-		if err := rows.Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive,
+			&c.Mode, &c.TeamJoinMode, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		cs = append(cs, c)
@@ -218,7 +228,7 @@ func (s *Store) ListCompetitions(ctx context.Context) ([]model.Competition, erro
 // 普通用户接口，只展示激活中的比赛。
 func (s *Store) ListActiveCompetitions(ctx context.Context) ([]model.Competition, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
+		`SELECT res_id, title, description, start_time, end_time, is_active, mode, team_join_mode, created_at, updated_at
 		 FROM competitions WHERE is_active = 1 AND is_deleted = 0 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -227,7 +237,8 @@ func (s *Store) ListActiveCompetitions(ctx context.Context) ([]model.Competition
 	var cs []model.Competition
 	for rows.Next() {
 		var c model.Competition
-		if err := rows.Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive,
+			&c.Mode, &c.TeamJoinMode, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		cs = append(cs, c)
@@ -240,9 +251,10 @@ func (s *Store) ListActiveCompetitions(ctx context.Context) ([]model.Competition
 func (s *Store) GetCompetitionByID(ctx context.Context, resID string) (*model.Competition, error) {
 	var c model.Competition
 	err := s.db.QueryRowContext(ctx,
-		`SELECT res_id, title, description, start_time, end_time, is_active, created_at, updated_at
+		`SELECT res_id, title, description, start_time, end_time, is_active, mode, team_join_mode, created_at, updated_at
 		 FROM competitions WHERE res_id = ? AND is_deleted = 0`, resID).
-		Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ResID, &c.Title, &c.Description, &c.StartTime, &c.EndTime, &c.IsActive,
+			&c.Mode, &c.TeamJoinMode, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -256,9 +268,15 @@ func (s *Store) GetCompetitionByID(ctx context.Context, resID string) (*model.Co
 // 返回生成的 res_id。
 func (s *Store) CreateCompetition(ctx context.Context, c *model.Competition) (string, error) {
 	c.ResID = uuid.Next()
+	if c.Mode == "" {
+		c.Mode = model.CompetitionModeIndividual
+	}
+	if c.TeamJoinMode == "" {
+		c.TeamJoinMode = model.TeamJoinModeFree
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO competitions (res_id, title, description, start_time, end_time, is_active) VALUES (?, ?, ?, ?, ?, ?)`,
-		c.ResID, c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive)
+		`INSERT INTO competitions (res_id, title, description, start_time, end_time, is_active, mode, team_join_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ResID, c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive, c.Mode, c.TeamJoinMode)
 	if err != nil {
 		return "", err
 	}
@@ -268,12 +286,68 @@ func (s *Store) CreateCompetition(ctx context.Context, c *model.Competition) (st
 // UpdateCompetition 根据 res_id 更新比赛信息。
 func (s *Store) UpdateCompetition(ctx context.Context, c *model.Competition) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE competitions SET title=?, description=?, start_time=?, end_time=?, is_active=? WHERE res_id=? AND is_deleted = 0`,
-		c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive, c.ResID)
+		`UPDATE competitions SET title=?, description=?, start_time=?, end_time=?, is_active=?, mode=?, team_join_mode=? WHERE res_id=? AND is_deleted = 0`,
+		c.Title, c.Description, c.StartTime, c.EndTime, c.IsActive, c.Mode, c.TeamJoinMode, c.ResID)
 	if err != nil {
 		return fmt.Errorf("update competition %s: %w", c.ResID, err)
 	}
 	return nil
+}
+
+// AddCompTeam 将一支队伍加入到比赛中（仅管理员模式使用）。
+func (s *Store) AddCompTeam(ctx context.Context, compID, teamID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO competition_teams (res_id, competition_id, team_id, created_at, updated_at, is_deleted)
+		 VALUES (?, ?, ?, NOW(), NOW(), 0)
+		 ON DUPLICATE KEY UPDATE is_deleted = 0, updated_at = NOW()`,
+		uuid.Next(), compID, teamID)
+	return err
+}
+
+// RemoveCompTeam 从比赛中移除一支队伍（仅管理员模式使用）。
+func (s *Store) RemoveCompTeam(ctx context.Context, compID, teamID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE competition_teams
+		 SET is_deleted = 1, updated_at = NOW()
+		 WHERE competition_id = ? AND team_id = ? AND is_deleted = 0`,
+		compID, teamID)
+	return err
+}
+
+// ListCompTeams 查询指定比赛中的所有队伍。
+func (s *Store) ListCompTeams(ctx context.Context, compID string) ([]model.CompetitionTeam, error) {
+	query := `SELECT id, res_id, competition_id, team_id, created_at, updated_at, is_deleted
+		 FROM competition_teams
+		 WHERE competition_id = ? AND is_deleted = 0`
+	rows, err := s.db.QueryContext(ctx, query, compID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var teams []model.CompetitionTeam
+	for rows.Next() {
+		var t model.CompetitionTeam
+		err := rows.Scan(&t.ID, &t.ResID, &t.CompetitionID, &t.TeamID, &t.CreatedAt, &t.UpdatedAt, &t.IsDeleted)
+		if err != nil {
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	return teams, rows.Err()
+}
+
+// IsTeamInComp 检查指定队伍是否已加入指定比赛。
+func (s *Store) IsTeamInComp(ctx context.Context, compID, teamID string) (bool, error) {
+	query := `SELECT COUNT(*)
+		 FROM competition_teams
+		 WHERE competition_id = ? AND team_id = ? AND is_deleted = 0`
+	var count int
+	err := s.db.QueryRowContext(ctx, query, compID, teamID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // DeleteCompetition 软删除比赛。先删除该比赛的题目关联记录，再将比赛标记为已删除。
