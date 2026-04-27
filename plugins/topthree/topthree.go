@@ -107,7 +107,7 @@ func calculateNewRank(current []topThreeRecord, submitTime time.Time) int {
 
 	// 三血已满，检查是否能替换（比现有记录更早）
 	for i, r := range current {
-		if submitTime.Before(r.CreatedAt) {
+		if submitTime.Before(r.CreatedAt.Time()) {
 			return i + 1
 		}
 	}

@@ -126,14 +126,18 @@ func (s *SubmissionService) SubmitInComp(ctx context.Context, req *SubmitInCompR
 	// ========== 步骤 4：验证 Flag 并记录提交 ==========
 	isCorrect := challenge.Flag == req.Flag
 	// 创建提交记录（无论对错都记录，用于后续分析）
-	if err := s.submissions.CreateSubmission(ctx, &model.Submission{
+	submission := &model.Submission{
 		UserID:        req.UserID,
 		TeamID:        teamID,
 		ChallengeID:   req.ChallengeID,
 		CompetitionID: req.CompetitionID,
 		SubmittedFlag: req.Flag,
 		IsCorrect:     isCorrect,
-	}); err != nil {
+	}
+	if err := submission.Validate(); err != nil {
+		return "", err
+	}
+	if err := s.submissions.CreateSubmission(ctx, submission); err != nil {
 		return "", err
 	}
 

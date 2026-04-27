@@ -53,10 +53,6 @@ func (s *ChallengeService) Get(ctx context.Context, resID string) (*model.Challe
 //
 // 返回新生成题目的 res_id。
 func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (string, error) {
-	// 验证必填字段
-	if c.Title == "" || c.Flag == "" {
-		return "", errors.New("title and flag are required")
-	}
 	// Set defaults on local values without mutating caller's struct
 	score := c.Score
 	if score <= 0 {
@@ -74,6 +70,10 @@ func (s *ChallengeService) Create(ctx context.Context, c *model.Challenge) (stri
 		Score:       score,
 		Category:    category,
 		IsEnabled:   true,
+	}
+	// Validate the challenge
+	if err := challenge.Validate(); err != nil {
+		return "", err
 	}
 	resID, err := s.store.Create(ctx, challenge)
 	if err != nil {
@@ -114,6 +114,10 @@ func (s *ChallengeService) Update(ctx context.Context, resID string, patch *mode
 	// NOTE: Mutation of `existing` is acceptable here — this is an Update pattern
 	// that needs to merge patch fields into the persisted entity before writing back.
 	existing.IsEnabled = patch.IsEnabled
+	// Validate the updated challenge
+	if err := existing.Validate(); err != nil {
+		return err
+	}
 	if err := s.store.Update(ctx, existing); err != nil {
 		return fmt.Errorf("update challenge %s: %w", resID, err)
 	}

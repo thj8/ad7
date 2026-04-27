@@ -2,12 +2,14 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
+	"ad7/internal/model"
 )
 
 // TeamHandler 处理队伍管理的 HTTP 请求。
@@ -58,8 +60,8 @@ func (h *TeamHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-		authWriteError(w, http.StatusBadRequest, "name is required")
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		authWriteError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	t := &Team{
@@ -68,6 +70,11 @@ func (h *TeamHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.CreateTeam(r.Context(), t)
 	if err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			authWriteError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		authWriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -96,6 +103,11 @@ func (h *TeamHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	t.ResID = id
 	if err := h.svc.UpdateTeam(r.Context(), t); err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			authWriteError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		authWriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

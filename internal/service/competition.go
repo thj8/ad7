@@ -94,10 +94,6 @@ func (s *CompetitionService) Get(ctx context.Context, resID string) (*model.Comp
 //
 // 返回新生成比赛的 res_id。
 func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (string, error) {
-	// 验证必填字段
-	if c.Title == "" {
-		return "", errors.New("title is required")
-	}
 	// 设置默认模式
 	if c.Mode == "" {
 		c.Mode = model.CompetitionModeIndividual
@@ -105,18 +101,9 @@ func (s *CompetitionService) Create(ctx context.Context, c *model.Competition) (
 	if c.TeamJoinMode == "" {
 		c.TeamJoinMode = model.TeamJoinModeFree
 	}
-	// 验证时间合法性
-	if c.EndTime.Before(c.StartTime) {
-		return "", errors.New("end_time must be after start_time")
-	}
-	// 验证模式合法性
-	if c.Mode != model.CompetitionModeIndividual && c.Mode != model.CompetitionModeTeam {
-		return "", ErrInvalidMode
-	}
-	if c.Mode == model.CompetitionModeTeam {
-		if c.TeamJoinMode != model.TeamJoinModeFree && c.TeamJoinMode != model.TeamJoinModeManaged {
-			return "", ErrInvalidMode
-		}
+	// 验证字段
+	if err := c.Validate(); err != nil {
+		return "", err
 	}
 	// 新建比赛默认激活
 	c.IsActive = true
@@ -152,23 +139,17 @@ func (s *CompetitionService) Update(ctx context.Context, resID string, patch *mo
 	}
 	// 合并模式（如果提供）
 	if patch.Mode != "" {
-		if patch.Mode != model.CompetitionModeIndividual && patch.Mode != model.CompetitionModeTeam {
-			return ErrInvalidMode
-		}
 		existing.Mode = patch.Mode
 	}
 	if patch.TeamJoinMode != "" {
-		if patch.TeamJoinMode != model.TeamJoinModeFree && patch.TeamJoinMode != model.TeamJoinModeManaged {
-			return ErrInvalidMode
-		}
 		existing.TeamJoinMode = patch.TeamJoinMode
-	}
-	// 合并后再次验证时间合法性
-	if existing.EndTime.Before(existing.StartTime) {
-		return errors.New("end_time must be after start_time")
 	}
 	// is_active 总是被显式设置
 	existing.IsActive = patch.IsActive
+	// 验证合并后的字段
+	if err := existing.Validate(); err != nil {
+		return err
+	}
 	return s.store.UpdateCompetition(ctx, existing)
 }
 
@@ -318,7 +299,7 @@ func (s *CompetitionService) EndCompetition(ctx context.Context, resID string) (
 func (s *CompetitionService) syncStatus(ctx context.Context, c *model.Competition) {
 	now := time.Now()
 	// 自动激活
-	if !c.IsActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
+	if !c.IsActive && !now.Before(c.StartTime.Time()) && now.Before(c.EndTime.Time()) {
 		if err := s.store.SetActive(ctx, c.ResID, true); err != nil {
 			logger.Error("failed to auto-activate competition", "competition_id", c.ResID, "error", err)
 			return
@@ -327,7 +308,7 @@ func (s *CompetitionService) syncStatus(ctx context.Context, c *model.Competitio
 		logger.Info("competition auto-activated", "competition_id", c.ResID)
 	}
 	// 自动结束
-	if c.IsActive && !now.Before(c.EndTime) {
+	if c.IsActive && !now.Before(c.EndTime.Time()) {
 		if err := s.store.SetActive(ctx, c.ResID, false); err != nil {
 			logger.Error("failed to auto-end competition", "competition_id", c.ResID, "error", err)
 			return

@@ -5,6 +5,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"ad7/internal/logger"
@@ -77,13 +78,6 @@ func (h *ChallengeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	// 验证字段长度限制
-	if err := validateLen("title", req.Title, maxTitleLen); err != nil ||
-		validateLen("flag", req.Flag, maxFlagLen) != nil ||
-		validateLen("description", req.Description, maxFieldLen) != nil {
-		writeError(w, http.StatusBadRequest, "field too long")
-		return
-	}
 	// 手动将请求体字段赋值给 model（因为 Flag 不能自动反序列化）
 	c := &model.Challenge{
 		Title:       req.Title,
@@ -94,6 +88,11 @@ func (h *ChallengeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Create(r.Context(), c)
 	if err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -122,13 +121,6 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	// 验证字段长度限制
-	if err := validateLen("title", req.Title, maxTitleLen); err != nil ||
-		validateLen("flag", req.Flag, maxFlagLen) != nil ||
-		validateLen("description", req.Description, maxFieldLen) != nil {
-		writeError(w, http.StatusBadRequest, "field too long")
-		return
-	}
 	// 构建 patch 对象用于合并更新
 	patch := &model.Challenge{
 		Title:       req.Title,
@@ -142,6 +134,11 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	} else if err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

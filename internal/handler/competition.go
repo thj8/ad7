@@ -4,8 +4,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"time"
 
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
@@ -104,7 +104,7 @@ type compCreateRequest struct {
 }
 
 // Create 处理 POST /api/v1/admin/competitions 请求（管理员）。
-// 解析请求体中的时间字符串（RFC3339 格式），创建新比赛。
+// 解析请求体中的时间字符串（支持 RFC3339 或 "2006-01-02 15:04:05" 格式），创建新比赛。
 // 返回 201 和新比赛的 res_id。
 func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req compCreateRequest
@@ -112,20 +112,14 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	// 验证字段长度限制
-	if validateLen("title", req.Title, maxTitleLen) != nil ||
-		validateLen("description", req.Description, maxFieldLen) != nil {
-		writeError(w, http.StatusBadRequest, "field too long")
-		return
-	}
-	// 解析开始时间（RFC3339 格式）
-	startTime, err := time.Parse(time.RFC3339, req.StartTime)
+	// 解析开始时间（支持两种格式）
+	startTime, err := parseTime(req.StartTime)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid start_time format")
 		return
 	}
-	// 解析结束时间（RFC3339 格式）
-	endTime, err := time.Parse(time.RFC3339, req.EndTime)
+	// 解析结束时间（支持两种格式）
+	endTime, err := parseTime(req.EndTime)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid end_time format")
 		return
@@ -140,6 +134,11 @@ func (h *CompetitionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Create(r.Context(), c)
 	if err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -167,12 +166,6 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	// 验证字段长度限制
-	if validateLen("title", req.Title, maxTitleLen) != nil ||
-		validateLen("description", req.Description, maxFieldLen) != nil {
-		writeError(w, http.StatusBadRequest, "field too long")
-		return
-	}
 	patch := &model.Competition{
 		Title:         req.Title,
 		Description:   req.Description,
@@ -182,7 +175,7 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	// 仅在提供了开始时间时才更新
 	if req.StartTime != "" {
-		t, err := time.Parse(time.RFC3339, req.StartTime)
+		t, err := parseTime(req.StartTime)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid start_time format")
 			return
@@ -191,7 +184,7 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	// 仅在提供了结束时间时才更新
 	if req.EndTime != "" {
-		t, err := time.Parse(time.RFC3339, req.EndTime)
+		t, err := parseTime(req.EndTime)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid end_time format")
 			return
@@ -201,10 +194,12 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Update(r.Context(), id, patch); err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
 		return
-	} else if err == service.ErrInvalidMode {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
 	} else if err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, valErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

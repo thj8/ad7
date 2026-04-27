@@ -5,7 +5,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
+	"ad7/internal/model"
 )
+
+const timeFormat = "2006-01-02 15:04:05"
+
+// parseTime 解析时间字符串，支持 RFC3339 和自定义格式 "2006-01-02 15:04:05"
+func parseTime(s string) (model.Time, error) {
+	// 先尝试自定义格式
+	t, err := time.ParseInLocation(timeFormat, s, time.Local)
+	if err == nil {
+		return model.Time(t), nil
+	}
+	// 再尝试 RFC3339
+	t, err = time.Parse(time.RFC3339, s)
+	if err == nil {
+		return model.Time(t), nil
+	}
+	return model.Time{}, err
+}
 
 // writeJSON 将数据序列化为 JSON 并写入 HTTP 响应。
 // 设置 Content-Type 为 application/json，并指定 HTTP 状态码。

@@ -33,22 +33,16 @@ func NewTeamService(teams TeamStore, users UserStore, teamMembers TeamMemberStor
 
 // CreateTeam 创建新队伍（向后兼容，不设置创建者）。
 func (s *TeamService) CreateTeam(ctx context.Context, t *Team) (string, error) {
-	if t.Name == "" {
-		return "", errors.New("team name is required")
-	}
-	if len(t.Name) > 255 {
-		return "", errors.New("team name too long (max 255)")
+	if err := t.Validate(); err != nil {
+		return "", err
 	}
 	return s.teams.CreateTeam(ctx, t)
 }
 
 // CreateTeamWithCreator 创建新队伍，创建者自动成为队长。
 func (s *TeamService) CreateTeamWithCreator(ctx context.Context, t *Team, creatorUserID string) (string, error) {
-	if t.Name == "" {
-		return "", errors.New("team name is required")
-	}
-	if len(t.Name) > 255 {
-		return "", errors.New("team name too long (max 255)")
+	if err := t.Validate(); err != nil {
+		return "", err
 	}
 
 	teamID, err := s.teams.CreateTeam(ctx, t)
@@ -88,8 +82,8 @@ func (s *TeamService) ListTeams(ctx context.Context) ([]Team, error) {
 
 // UpdateTeam 更新队伍信息。
 func (s *TeamService) UpdateTeam(ctx context.Context, t *Team) error {
-	if t.Name == "" {
-		return errors.New("team name is required")
+	if err := t.Validate(); err != nil {
+		return err
 	}
 	return s.teams.UpdateTeam(ctx, t)
 }

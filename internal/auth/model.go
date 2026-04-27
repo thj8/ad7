@@ -39,3 +39,51 @@ type MemberInfo struct {
 	Role     string `json:"role"`      // 角色：captain 或 member
 	JoinedAt string `json:"joined_at"` // 加入时间（RFC3339 格式）
 }
+
+// Validate 验证 User 字段
+func (u *User) Validate() error {
+	if u.Username == "" {
+		return model.ErrFieldRequired("username")
+	}
+	if len(u.Username) > 255 {
+		return model.ErrFieldTooLong("username", 255)
+	}
+	if u.Role != "" && u.Role != "member" && u.Role != "admin" {
+		return model.ErrFieldInvalid("role", "must be member or admin")
+	}
+	return nil
+}
+
+// Validate 验证 Team 字段
+func (t *Team) Validate() error {
+	if t.Name == "" {
+		return model.ErrFieldRequired("name")
+	}
+	if len(t.Name) > 255 {
+		return model.ErrFieldTooLong("name", 255)
+	}
+	if len(t.Description) > 4096 {
+		return model.ErrFieldTooLong("description", 4096)
+	}
+	return nil
+}
+
+// Validate 验证 TeamMember 字段
+func (tm *TeamMember) Validate() error {
+	if tm.TeamID == "" {
+		return model.ErrFieldRequired("team_id")
+	}
+	if len(tm.TeamID) > 32 {
+		return model.ErrFieldTooLong("team_id", 32)
+	}
+	if tm.UserID == "" {
+		return model.ErrFieldRequired("user_id")
+	}
+	if len(tm.UserID) > 32 {
+		return model.ErrFieldTooLong("user_id", 32)
+	}
+	if tm.Role != "" && tm.Role != "captain" && tm.Role != "member" {
+		return model.ErrFieldInvalid("role", "must be captain or member")
+	}
+	return nil
+}
