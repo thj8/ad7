@@ -48,6 +48,10 @@ type SubmissionStore interface {
 	// competitionID 为必填参数，所有提交都限定在比赛范围内。
 	HasCorrectSubmission(ctx context.Context, userID string, challengeID string, competitionID string) (bool, error)
 
+	// HasTeamCorrectSubmission 检查指定队伍在指定比赛中是否已正确提交过某道题目。
+	// competitionID 为必填参数，所有提交都限定在比赛范围内。
+	HasTeamCorrectSubmission(ctx context.Context, teamID string, challengeID string, competitionID string) (bool, error)
+
 	// CreateSubmission 创建提交记录，CompetitionID 为必填。
 	CreateSubmission(ctx context.Context, s *model.Submission) error
 
@@ -93,4 +97,16 @@ type CompetitionStore interface {
 	// SetActive 设置比赛的 is_active 状态。
 	// 通过 res_id 定位，仅更新未删除的比赛。
 	SetActive(ctx context.Context, resID string, active bool) error
+
+	// AddCompTeam 将一支队伍加入到比赛中（仅管理员模式使用）。
+	AddCompTeam(ctx context.Context, compID, teamID string) error
+
+	// RemoveCompTeam 从比赛中移除一支队伍（仅管理员模式使用）。
+	RemoveCompTeam(ctx context.Context, compID, teamID string) error
+
+	// ListCompTeams 查询指定比赛中的所有队伍。
+	ListCompTeams(ctx context.Context, compID string) ([]model.CompetitionTeam, error)
+
+	// IsTeamInComp 检查指定队伍是否已加入指定比赛。
+	IsTeamInComp(ctx context.Context, compID, teamID string) (bool, error)
 }
