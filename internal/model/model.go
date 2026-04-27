@@ -33,6 +33,7 @@ type Challenge struct {
 type Submission struct {
 	BaseModel
 	UserID        string    `json:"user_id"`        // 提交用户 ID（来自 JWT 的 sub claim）
+	TeamID        string    `json:"team_id"`        // 队伍 ID（队伍模式时填写）
 	ChallengeID   string    `json:"challenge_id"`   // 提交的题目 ID
 	CompetitionID string    `json:"competition_id"` // 所属比赛 ID
 	SubmittedFlag string    `json:"submitted_flag"` // 用户提交的 Flag 内容

@@ -2,16 +2,29 @@ package model
 
 import "time"
 
+type CompetitionMode string
+type TeamJoinMode string
+
+const (
+	CompetitionModeIndividual CompetitionMode = "individual"
+	CompetitionModeTeam       CompetitionMode = "team"
+
+	TeamJoinModeFree    TeamJoinMode = "free"
+	TeamJoinModeManaged TeamJoinMode = "managed"
+)
+
 // Competition 表示一个 CTF 比赛。
 // 比赛有起止时间、激活状态，可以关联多道题目。
 // 所有数据（排行榜、通知等）都限定在比赛范围内，没有全局概念。
 type Competition struct {
 	BaseModel
-	Title       string    `json:"title"`       // 比赛标题
-	Description string    `json:"description"` // 比赛描述
-	StartTime   time.Time `json:"start_time"`  // 比赛开始时间
-	EndTime     time.Time `json:"end_time"`    // 比赛结束时间
-	IsActive    bool      `json:"is_active"`   // 比赛是否激活
+	Title         string            `json:"title"`       // 比赛标题
+	Description   string            `json:"description"` // 比赛描述
+	StartTime     time.Time         `json:"start_time"`  // 比赛开始时间
+	EndTime       time.Time         `json:"end_time"`    // 比赛结束时间
+	IsActive      bool              `json:"is_active"`   // 比赛是否激活
+	Mode          CompetitionMode   `json:"mode"`        // 比赛模式：个人或队伍
+	TeamJoinMode  TeamJoinMode      `json:"team_join_mode"` // 队伍加入模式：自由或管理员管理
 }
 
 // CompetitionChallenge 表示比赛与题目的多对多关联关系。
@@ -20,4 +33,11 @@ type CompetitionChallenge struct {
 	BaseModel
 	CompetitionID string `json:"competition_id"`  // 比赛的 res_id
 	ChallengeID   string `json:"challenge_id"`    // 题目的 res_id
+}
+
+// CompetitionTeam 表示比赛与队伍的多对多关联关系（仅用于管理员模式）。
+type CompetitionTeam struct {
+	BaseModel
+	CompetitionID string `json:"competition_id"` // 比赛的 res_id
+	TeamID        string `json:"team_id"`        // 队伍的 res_id
 }
