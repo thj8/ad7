@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"ad7/internal/middleware"
 	"ad7/internal/service"
 	"ad7/internal/store"
@@ -25,19 +23,12 @@ func NewSubmissionHandler(svc *service.SubmissionService) *SubmissionHandler {
 }
 
 // SubmitInComp 处理 POST /api/v1/competitions/{comp_id}/challenges/{id}/submit 请求。
-// 比赛范围内的 Flag 提交。从 URL 获取比赛 ID 和题目 ID。
+// 比赛范围内的 Flag 提交。从 Context 获取已验证的比赛 ID 和题目 ID。
 // 返回提交结果：correct / incorrect / already_solved。
 func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request) {
-	compID := chi.URLParam(r, "comp_id")
-	if len(compID) != 32 {
-		writeError(w, http.StatusBadRequest, "invalid competition id")
-		return
-	}
-	chalID := chi.URLParam(r, "id")
-	if len(chalID) != 32 {
-		writeError(w, http.StatusBadRequest, "invalid challenge id")
-		return
-	}
+	compID := middleware.CompID(r)
+	chalID := middleware.ChalID(r)
+
 	var body struct {
 		Flag string `json:"flag"`
 	}
@@ -73,11 +64,7 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 // ListByComp 处理 GET /api/v1/admin/competitions/{id}/submissions 请求（管理员）。
 // 支持通过 query 参数 user_id 和 challenge_id 过滤提交记录。
 func (h *SubmissionHandler) ListByComp(w http.ResponseWriter, r *http.Request) {
-	compID := chi.URLParam(r, "id")
-	if len(compID) != 32 {
-		writeError(w, http.StatusBadRequest, "invalid competition id")
-		return
-	}
+	compID := middleware.ID(r)
 	userID := r.URL.Query().Get("user_id")
 	challengeID := r.URL.Query().Get("challenge_id")
 	subs, err := h.svc.ListByComp(r.Context(), store.ListSubmissionsParams{

@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
@@ -43,15 +41,10 @@ func (h *ChallengeHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Get 处理 GET /api/v1/challenges/{id} 请求。
-// 根据 URL 参数中的 res_id 获取单个题目详情。
-// 返回 404 如果题目不存在或 ID 格式无效。
+// 根据 URL 参数中的 res_id 获取单个题目详情（已通过中间件验证）。
+// 返回 404 如果题目不存在。
 func (h *ChallengeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	// 从 URL 中提取并验证 res_id（必须为 32 字符）
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	c, err := h.svc.Get(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -123,11 +116,7 @@ type updateRequest struct {
 // 使用合并策略更新题目：只修改请求中非空/非零的字段。
 // is_enabled 总是被显式设置。
 func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -163,26 +152,11 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete 处理 DELETE /api/v1/admin/challenges/{id} 请求（管理员）。
 // 软删除指定题目。
 func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	logger.Info("challenge deleted", "user", middleware.UserID(r), "role", r.Context().Value(middleware.CtxRole), "challenge_id", id)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// parseID 从 URL 路径参数中提取并验证 res_id。
-// res_id 必须为 32 字符（UUID v4 十六进制无连字符）。
-// 返回 ID 字符串和是否有效的布尔值。
-func parseID(r *http.Request) (string, bool) {
-	id := chi.URLParam(r, "id")
-	if len(id) != 32 {
-		return "", false
-	}
-	return id, true
 }

@@ -14,5 +14,7 @@ func RegisterSubmissionRoutes(r chi.Router, deps RouteDeps) {
 			deps.Config.RateLimit.Submission.Requests,
 			deps.Config.RateLimit.Submission.Window,
 		),
+		middleware.ValidateURLParam("comp_id", middleware.CtxKeyCompID),
+		middleware.ValidateURLParam("id", middleware.CtxKeyChalID),
 	).Post("/competitions/{comp_id}/challenges/{id}/submit", deps.SubmissionH.SubmitInComp)
 }

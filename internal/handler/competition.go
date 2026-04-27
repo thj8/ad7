@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
@@ -46,11 +44,7 @@ func (h *CompetitionHandler) List(w http.ResponseWriter, r *http.Request) {
 // Get 处理 GET /api/v1/competitions/{id} 请求。
 // 根据 res_id 获取单个比赛的详情。
 func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	c, err := h.svc.Get(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -67,11 +61,7 @@ func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
 // 返回指定比赛中所有已启用的题目列表。
 // 队伍模式下会检查访问权限。
 func (h *CompetitionHandler) ListChallenges(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 
 	if err := h.svc.CheckCompAccess(r.Context(), id, middleware.UserID(r), h.teamResolver); err != nil {
 		if err == service.ErrMustJoinTeam {
@@ -171,11 +161,7 @@ type compUpdateRequest struct {
 // Update 处理 PUT /api/v1/admin/competitions/{id} 请求（管理员）。
 // 使用合并策略更新比赛。时间字段只在非空时更新。
 func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	var req compUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -229,11 +215,7 @@ func (h *CompetitionHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete 处理 DELETE /api/v1/admin/competitions/{id} 请求（管理员）。
 // 软删除指定比赛。
 func (h *CompetitionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -259,11 +241,7 @@ func (h *CompetitionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 // AddChallenge 处理 POST /api/v1/admin/competitions/{id}/challenges 请求（管理员）。
 // 将一道题目分配到指定比赛中。请求体需包含 challenge_id。
 func (h *CompetitionHandler) AddChallenge(w http.ResponseWriter, r *http.Request) {
-	compID, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	compID := middleware.ID(r)
 	var body struct {
 		ChallengeID string `json:"challenge_id"`
 	}
@@ -282,17 +260,8 @@ func (h *CompetitionHandler) AddChallenge(w http.ResponseWriter, r *http.Request
 // RemoveChallenge 处理 DELETE /api/v1/admin/competitions/{id}/challenges/{challenge_id} 请求（管理员）。
 // 从指定比赛中移除一道题目。题目和比赛的 ID 均从 URL 路径参数获取。
 func (h *CompetitionHandler) RemoveChallenge(w http.ResponseWriter, r *http.Request) {
-	compID, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	// 从 URL 获取题目 ID（无需 32 字符验证，由数据库处理）
-	chalID := chi.URLParam(r, "challenge_id")
-	if chalID == "" {
-		writeError(w, http.StatusBadRequest, "invalid challenge_id")
-		return
-	}
+	compID := middleware.ID(r)
+	chalID := middleware.ChalID(r)
 	if err := h.svc.RemoveChallenge(r.Context(), compID, chalID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -316,11 +285,7 @@ type compTeamResponse struct {
 // ListTeams 处理 GET /api/v1/competitions/{id}/teams 请求。
 // 返回比赛中的队伍列表（仅管理员模式比赛使用）。
 func (h *CompetitionHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
-	compID, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	compID := middleware.ID(r)
 	teams, err := h.svc.ListCompTeams(r.Context(), compID)
 	if err != nil {
 		logger.Error("list competition teams", "error", err, "user_id", middleware.UserID(r))
@@ -341,11 +306,7 @@ func (h *CompetitionHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 // AddTeam 处理 POST /api/v1/admin/competitions/{id}/teams 请求（管理员）。
 // 将一支队伍添加到比赛中（仅管理员模式比赛使用）。
 func (h *CompetitionHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
-	compID, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	compID := middleware.ID(r)
 	var req compTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -377,16 +338,8 @@ func (h *CompetitionHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 // RemoveTeam 处理 DELETE /api/v1/admin/competitions/{id}/teams/{team_id} 请求（管理员）。
 // 从比赛中移除一支队伍。
 func (h *CompetitionHandler) RemoveTeam(w http.ResponseWriter, r *http.Request) {
-	compID, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	teamID := chi.URLParam(r, "team_id")
-	if len(teamID) != 32 {
-		writeError(w, http.StatusBadRequest, "invalid team_id")
-		return
-	}
+	compID := middleware.ID(r)
+	teamID := middleware.TeamID(r)
 
 	if err := h.svc.RemoveCompTeam(r.Context(), compID, teamID); err != nil {
 		if err == service.ErrCompNotTeamMode || err == service.ErrCompFreeMode {
@@ -409,11 +362,7 @@ func (h *CompetitionHandler) RemoveTeam(w http.ResponseWriter, r *http.Request) 
 // 手动激活指定比赛。返回更新后的比赛信息。
 // 如果比赛已激活返回 409，不存在返回 404。
 func (h *CompetitionHandler) Start(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	c, err := h.svc.StartCompetition(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -435,11 +384,7 @@ func (h *CompetitionHandler) Start(w http.ResponseWriter, r *http.Request) {
 // 手动结束指定比赛。返回更新后的比赛信息。
 // 如果比赛已结束返回 409，不存在返回 404。
 func (h *CompetitionHandler) End(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+	id := middleware.ID(r)
 	c, err := h.svc.EndCompetition(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
