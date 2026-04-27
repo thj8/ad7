@@ -48,6 +48,9 @@ mysql -h <host> -u root -p<password> ctf < sql/schema.sql
 
 # 运行迁移脚本（从 users.team_id 迁移到 team_members）
 mysql -h <host> -u root -p<password> ctf < sql/migrations/001_team_members.sql
+
+# 运行队伍比赛模式迁移
+mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_mode.sql
 ```
 
 ## 架构
@@ -74,12 +77,20 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/001_team_members.sql
 **插件系统：**
 - `internal/plugin/` — `Plugin` 接口：`Name() string` 和 `Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]Plugin)`。插件通过名称标识，支持依赖注入
 - `internal/plugin/names.go` — 插件名称常量：`NameLeaderboard`、`NameNotification`、`NameHints`、`NameAnalytics`、`NameTopThree`
-- `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口、共享查询函数（`GetCompChallenges`、`GetCorrectSubmissions`、`GetUserScores` 等）
-- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，实现 `TopThreeProvider` 接口暴露给其他插件
-- `plugins/leaderboard/` — 每个比赛的排行榜，通过 `TopThreeProvider` 接口获取三血数据，不直接查询 topthree_records 表
+- `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口、共享查询函数（`GetCompChallenges`、`GetCorrectSubmissions`、`GetUserScores`、`GetTeamCorrectSubmissions`、`GetTeamScores` 等）
+- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，实现 `TopThreeProvider` 接口暴露给其他插件，支持个人模式和队伍模式
+- `plugins/leaderboard/` — 每个比赛的排行榜，通过 `TopThreeProvider` 接口获取三血数据，不直接查询 topthree_records 表，支持个人模式和队伍模式切换
 - `plugins/notification/` — 每个比赛的通知（管理员创建，所有用户查看）
 - `plugins/hints/` — 题目提示（管理员管理，用户查看可见提示）
-- `plugins/analytics/` — 比赛分析，所有查询通过 `pluginutil` 共享函数，无直接 SQL
+- `plugins/analytics/` — 比赛分析，所有查询通过 `pluginutil` 共享函数，无直接 SQL，支持个人模式和队伍模式的统计数据
+
+**比赛模式：**
+- 支持两种比赛模式：`individual`（个人模式，默认）和 `team`（队伍模式）
+- 支持两种队伍加入方式：`free`（自由加入，任何有队伍的用户可进入）和 `admin`（管理模式，仅管理员添加的队伍可进入）
+- `competitions.mode` 字段指定模式，`competitions.team_join_mode` 指定队伍加入方式
+- `competition_teams` 表管理比赛-队伍关联
+- 队伍模式下，单个队伍成员的正确提交计入整个队伍，题目级别去重（一个队伍对一道题目只能提交一次正确答案）
+- 事件 `EventCorrectSubmission` 包含 `TeamID` 字段（队伍模式时有值）
 
 **事件系统：**
 - `internal/event/` — 进程内 pub/sub，基于 `sync.RWMutex`。`Publish` 在独立 goroutine 中调用订阅者，不阻塞发布者。当前事件类型：`EventCorrectSubmission`
@@ -114,3 +125,6 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/001_team_members.sql
 - **输入验证**: 字符串字段有长度限制（title/flag 最多255字符，description 最多4096字符）
 - **查询数据库**: 插件不允许直接查询数据库，仅可以查自己插件的数据库, 不能写 SQL 查主表，必须用 pluginutil 中的共享查询函数
 - **用户-队伍关系**: 使用 `team_members` 关联表替代 `users.team_id` 列，支持多队预备（当前通过服务层约束单队）。支持队伍内部角色：`captain`（队长）和 `member`（成员）。每个队伍有且仅有一个队长，队长在有其他成员时不能被移除，必须先转移队长权限
+- **队伍比赛模式**: 比赛创建时可选择个人模式或队伍模式。队伍模式下，排行榜、topthree、analytics 都按队伍统计而非个人。队伍提交会去重，同一题目同一队伍只有首次正确提交计分
+- **访问控制**: 队伍模式下，CheckCompAccess 验证用户是否属于有权限参加比赛的队伍（自由加入模式：用户有队伍即可；管理模式：队伍需在 competition_teams 表中）
+- **向后兼容**: 所有现有代码默认使用个人模式，mode 字段默认值为 "individual"，确保不影响现有功能

@@ -79,6 +79,7 @@ components:
         created_at:     { type: string, format: date-time }
         updated_at:     { type: string, format: date-time }
         user_id:        { type: string }
+        team_id:        { type: string, description: "队伍ID(队伍模式)" }
         challenge_id:   { type: string }
         competition_id: { type: string }
         submitted_flag: { type: string }
@@ -95,6 +96,8 @@ components:
         start_time:  { type: string, format: date-time }
         end_time:    { type: string, format: date-time }
         is_active:   { type: boolean }
+        mode:        { type: string, description: "比赛模式: individual(个人) 或 team(队伍)", enum: [individual, team], default: individual }
+        team_join_mode: { type: string, description: "队伍加入方式: free(自由加入) 或 admin(管理员添加)", enum: [free, admin], default: free }
 
     Notification:
       type: object
@@ -119,7 +122,8 @@ components:
       type: object
       properties:
         rank:            { type: integer }
-        user_id:         { type: string }
+        user_id:         { type: string, description: "用户ID(个人模式)" }
+        team_id:         { type: string, description: "队伍ID(队伍模式)" }
         total_score:     { type: integer }
         last_solve_time: { type: string, format: date-time }
         challenges:
@@ -145,18 +149,20 @@ components:
             type: object
             properties:
               ranking:    { type: integer, description: 排名 1-3 }
-              user_id:    { type: string }
+              user_id:    { type: string, description: "用户ID(个人模式)" }
+              team_id:    { type: string, description: "队伍ID(队伍模式)" }
               created_at: { type: string, format: date-time }
 
     AnalyticsOverview:
       type: object
       properties:
-        total_users:               { type: integer }
+        total_users:               { type: integer, description: "用户总数(个人模式)" }
+        total_teams:               { type: integer, description: "队伍总数(队伍模式)" }
         total_challenges:          { type: integer }
         total_submissions:         { type: integer }
         correct_submissions:       { type: integer }
-        average_solves:            { type: number }
-        average_solve_time_seconds: { type: string, description: 格式化为两位小数的字符串 }
+        average_solves:            { type: number, description: "平均每人/每队解题数" }
+        average_solve_time_seconds: { type: string, description: "格式化为两位小数的字符串" }
         completion_rate:           { type: number }
 
     AnalyticsCategory:
@@ -165,14 +171,17 @@ components:
         category:              { type: string }
         total_challenges:      { type: integer }
         total_solves:          { type: integer }
-        unique_users_solved:   { type: integer }
-        average_solves_per_user: { type: number }
+        unique_users_solved:   { type: integer, description: "独立解题用户数(个人模式)" }
+        unique_teams_solved:   { type: integer, description: "独立解题队伍数(队伍模式)" }
+        average_solves_per_user: { type: number, description: "平均每人解题数(个人模式)" }
+        average_solves_per_team: { type: number, description: "平均每队解题数(队伍模式)" }
         success_rate:          { type: number }
 
     AnalyticsUser:
       type: object
       properties:
-        user_id:         { type: string }
+        user_id:         { type: string, description: "用户ID(个人模式)" }
+        team_id:         { type: string, description: "队伍ID(队伍模式)" }
         total_solves:    { type: integer }
         total_score:     { type: integer }
         total_attempts:  { type: integer }
@@ -190,9 +199,10 @@ components:
         total_solves:             { type: integer }
         total_attempts:           { type: integer }
         success_rate:             { type: number }
-        unique_users_solved:      { type: integer }
+        unique_users_solved:      { type: integer, description: "独立解题用户数(个人模式)" }
+        unique_teams_solved:      { type: integer, description: "独立解题队伍数(队伍模式)" }
         first_solve_time:         { type: string, format: date-time }
-        average_solve_time_seconds: { type: string, description: 格式化为两位小数的字符串 }
+        average_solve_time_seconds: { type: string, description: "格式化为两位小数的字符串" }
 
     SubmitResult:
       type: object
@@ -551,6 +561,45 @@ paths:
 
   # ─── 题目 ───
 
+  /api/v1/submissions:
+    post:
+      summary: 全局提交flag
+      description: 提交flag到题目，不限比赛
+      servers:
+        - url: http://localhost:8080
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, flag]
+              properties:
+                challenge_id: { type: string }
+                flag: { type: string, example: "flag{hello_world}" }
+      responses:
+        '200':
+          description: 提交结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitResult'
+        '400':
+          description: 缺少字段
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 题目不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/challenges:
     get:
       summary: 获取题目列表
@@ -655,6 +704,7 @@ paths:
   /api/v1/competitions/{id}/challenges:
     get:
       summary: 获取比赛的题目列表
+      description: 队伍模式下验证用户是否属于有权限的队伍
       servers:
         - url: http://localhost:8080
       parameters:
@@ -676,36 +726,129 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 无权限访问(队伍模式)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
-  # ─── 提交 flag ───
-
-  /api/v1/competitions/{comp_id}/challenges/{id}/submit:
-    post:
-      summary: 在比赛中提交 flag
-      description: |
-        提交 flag 到指定比赛的指定题目。正确提交会触发 EventCorrectSubmission 事件，
-        topthree 插件记录一血/二血/三血。按用户 ID 限流（3 次/10 秒）。
+  /api/v1/competitions/{id}/teams:
+    get:
+      summary: 获取比赛的队伍列表(管理员)
+      description: 仅管理员，仅队伍模式可用
       servers:
         - url: http://localhost:8080
       parameters:
-        - name: comp_id
-          in: path
-          required: true
-          schema: { type: string }
-          description: 比赛 res_id
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-          description: 题目 res_id
+        - $ref: '#/components/parameters/ResID'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id: { type: string }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      summary: 添加队伍到比赛(管理员)
+      description: 仅管理员，仅admin队伍加入方式可用
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [flag]
+              required: [team_id]
               properties:
+                team_id: { type: string }
+      responses:
+        '201':
+          description: 添加成功
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员或不是admin加入方式
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/competitions/{id}/teams/{team_id}:
+    delete:
+      summary: 从比赛移除队伍(管理员)
+      description: 仅管理员
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+        - name: team_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: 队伍res_id
+      responses:
+        '204':
+          description: 移除成功
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── 提交 flag ───
+
+  /api/v1/competitions/{id}/submit:
+    post:
+      summary: 在比赛中提交 flag
+      description: |
+        提交 flag 到指定比赛的指定题目。正确提交会触发 EventCorrectSubmission 事件，
+        topthree 插件记录一血/二血/三血。按用户 ID 限流（3 次/10 秒）。
+        队伍模式下按队伍去重，同一队伍同一题目只有第一次正确提交计分。
+      servers:
+        - url: http://localhost:8080
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, flag]
+              properties:
+                challenge_id: { type: string, description: 题目res_id }
                 flag: { type: string, example: "flag{hello_world}" }
       responses:
         '200':
@@ -715,12 +858,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/SubmitResult'
         '400':
-          description: 缺少 flag 字段
+          description: 缺少字段
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401':
           description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 无权限访问(队伍模式)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -737,7 +885,7 @@ paths:
 
   # ─── 管理员 - 题目 ───
 
-  /api/v1/admin/challenges:
+  /api/v1/challenges:
     post:
       summary: 创建题目
       description: 需要 admin 角色
@@ -781,7 +929,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/challenges/{id}:
+  /api/v1/challenges/{id}:
     put:
       summary: 更新题目
       description: 需要 admin 角色，只更新传入的非零字段
@@ -849,7 +997,7 @@ paths:
 
   # ─── 管理员 - 提交记录 ───
 
-  /api/v1/admin/competitions/{id}/submissions:
+  /api/v1/competitions/{id}/submissions:
     get:
       summary: 查看比赛提交记录
       description: 需要 admin 角色
@@ -882,7 +1030,7 @@ paths:
 
   # ─── 管理员 - 比赛 ───
 
-  /api/v1/admin/competitions:
+  /api/v1/competitions:
     post:
       summary: 创建比赛
       description: 需要 admin 角色
@@ -900,6 +1048,8 @@ paths:
                 description: { type: string, maxLength: 4096 }
                 start_time:  { type: string, format: date-time }
                 end_time:    { type: string, format: date-time }
+                mode:        { type: string, enum: [individual, team], default: individual }
+                team_join_mode: { type: string, enum: [free, admin], default: free }
       responses:
         '201':
           description: 创建成功
@@ -953,7 +1103,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/competitions/{id}:
+  /api/v1/competitions/{id}:
     put:
       summary: 更新比赛
       description: 需要 admin 角色，只更新传入的非零字段
@@ -973,6 +1123,8 @@ paths:
                 start_time:  { type: string, format: date-time }
                 end_time:    { type: string, format: date-time }
                 is_active:   { type: boolean }
+                mode:        { type: string, enum: [individual, team] }
+                team_join_mode: { type: string, enum: [free, admin] }
       responses:
         '204':
           description: 更新成功
@@ -1018,7 +1170,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/competitions/{id}/challenges:
+  /api/v1/competitions/{id}/challenges:
     post:
       summary: 为比赛添加题目
       description: 需要 admin 角色
@@ -1060,7 +1212,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/competitions/{id}/challenges/{challenge_id}:
+  /api/v1/competitions/{id}/challenges/{challenge_id}:
     delete:
       summary: 从比赛中移除题目
       description: 需要 admin 角色
@@ -1087,7 +1239,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/competitions/{id}/start:
+  /api/v1/competitions/{id}/start:
     post:
       summary: 开始比赛
       description: 需要 admin 角色。将比赛标记为进行中
@@ -1123,7 +1275,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/competitions/{id}/end:
+  /api/v1/competitions/{id}/end:
     post:
       summary: 结束比赛
       description: 需要 admin 角色。将比赛标记为已结束
@@ -1161,7 +1313,7 @@ paths:
 
   # ─── 管理员 - 通知 ───
 
-  /api/v1/admin/competitions/{id}/notifications:
+  /api/v1/competitions/{id}/notifications:
     post:
       summary: 为比赛创建通知
       description: 需要 admin 角色
@@ -1200,7 +1352,7 @@ paths:
 
   # ─── 管理员 - 提示 ───
 
-  /api/v1/admin/challenges/{id}/hints:
+  /api/v1/challenges/{id}/hints:
     post:
       summary: 为题目创建提示
       description: 需要 admin 角色
@@ -1236,7 +1388,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/hints/{id}:
+  /api/v1/hints/{id}:
     put:
       summary: 更新提示
       description: 需要 admin 角色
@@ -1298,7 +1450,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/admin/notifications/{id}:
+  /api/v1/notifications/{id}:
     put:
       summary: 更新通知
       description: 需要 admin 角色
@@ -1420,7 +1572,7 @@ paths:
   /api/v1/competitions/{id}/leaderboard:
     get:
       summary: 获取比赛排行榜
-      description: 按总得分降序，同分按最后解题时间升序排列。包含每道题的解题状态和一血/二血/三血排名
+      description: 根据比赛模式返回个人或队伍排行榜。按总得分降序，同分按最后解题时间升序排列。包含每道题的解题状态和一血/二血/三血排名
       servers:
         - url: http://localhost:8080
       parameters:
@@ -1448,7 +1600,7 @@ paths:
   /api/v1/topthree/competitions/{id}:
     get:
       summary: 获取比赛一二三血排名
-      description: 返回每道题的前三名解题者
+      description: 根据比赛模式返回个人或队伍的前三名解题者
       servers:
         - url: http://localhost:8080
       parameters:
@@ -1474,29 +1626,10 @@ paths:
 
   # ─── 分析 ───
 
-  /api/v1/competitions/{id}/analytics/overview:
+  /api/v1/competitions/{id}/analytics:
     get:
-      summary: 比赛概览统计
-      servers:
-        - url: http://localhost:8080
-      parameters:
-        - $ref: '#/components/parameters/ResID'
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalyticsOverview'
-        '401':
-          description: 未认证
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/competitions/{id}/analytics/categories:
-    get:
-      summary: 按分类统计
+      summary: 比赛完整统计
+      description: 根据比赛模式返回个人或队伍统计，包含概览、分类、用户/队伍、题目统计
       servers:
         - url: http://localhost:8080
       parameters:
@@ -1509,56 +1642,16 @@ paths:
               schema:
                 type: object
                 properties:
+                  overview:
+                    $ref: '#/components/schemas/AnalyticsOverview'
                   categories:
                     type: array
                     items:
                       $ref: '#/components/schemas/AnalyticsCategory'
-        '401':
-          description: 未认证
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/competitions/{id}/analytics/users:
-    get:
-      summary: 按用户统计
-      servers:
-        - url: http://localhost:8080
-      parameters:
-        - $ref: '#/components/parameters/ResID'
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
                   users:
                     type: array
                     items:
                       $ref: '#/components/schemas/AnalyticsUser'
-        '401':
-          description: 未认证
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/competitions/{id}/analytics/challenges:
-    get:
-      summary: 按题目统计
-      servers:
-        - url: http://localhost:8080
-      parameters:
-        - $ref: '#/components/parameters/ResID'
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
                   challenges:
                     type: array
                     items:
