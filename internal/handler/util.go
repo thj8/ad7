@@ -3,7 +3,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -40,18 +39,3 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// 字段长度常量
-const (
-	maxFieldLen = 4096
-	maxTitleLen = 255
-	maxFlagLen  = 255
-)
-
-// validateLen 验证字符串字段是否超过最大长度限制。
-// 如果超过限制返回错误，否则返回 nil。
-func validateLen(field, value string, max int) error {
-	if len(value) > max {
-		return fmt.Errorf("%s too long (max %d)", field, max)
-	}
-	return nil
-}

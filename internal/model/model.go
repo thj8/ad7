@@ -5,7 +5,6 @@ package model
 
 import (
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -14,7 +13,7 @@ const timeFormat = "2006-01-02 15:04:05"
 
 // 验证错误
 var (
-	ErrInvalidMode = errors.New("invalid mode")
+	ErrInvalidMode = ErrFieldInvalid("mode", "must be individual or team")
 )
 
 type ValidationError struct {

@@ -65,7 +65,7 @@ func (c *Competition) Validate() error {
 	}
 	if c.Mode == CompetitionModeTeam {
 		if c.TeamJoinMode != "" && c.TeamJoinMode != TeamJoinModeFree && c.TeamJoinMode != TeamJoinModeManaged {
-			return ErrInvalidMode
+			return ErrFieldInvalid("team_join_mode", "must be free or managed")
 		}
 	}
 	return nil

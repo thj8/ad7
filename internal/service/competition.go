@@ -28,9 +28,6 @@ var ErrCompNotTeamMode = errors.New("competition is not in team mode")
 // ErrCompFreeMode 表示比赛是自由模式，不能通过管理员添加队伍。
 var ErrCompFreeMode = errors.New("competition uses free join mode")
 
-// ErrInvalidMode 表示无效的比赛模式。
-var ErrInvalidMode = errors.New("invalid mode value")
-
 // CompetitionService 封装比赛相关的业务逻辑。
 // 持有 CompetitionStore 接口用于数据访问。
 type CompetitionService struct {

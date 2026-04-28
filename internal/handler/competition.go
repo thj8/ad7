@@ -308,8 +308,14 @@ func (h *CompetitionHandler) AddTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	if err := validateLen("team_id", req.TeamID, 32); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	ct := &model.CompetitionTeam{CompetitionID: compID, TeamID: req.TeamID}
+	if err := ct.Validate(); err != nil {
+		var valErr *model.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, valErr.Error())
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
