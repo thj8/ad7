@@ -9,7 +9,7 @@ db:
   dbname: "ctf"
 
 jwt:
-  secret: "change-me-in-production"
+  secret: "dev-only-secret-change-in-production-abc123"
   admin_role: "admin"
 
 log:

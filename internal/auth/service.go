@@ -69,10 +69,7 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*User
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	role := req.Role
-	if role == "" {
-		role = "member"
-	}
+	role := "member" // 注册强制为 member，忽略用户传入的 role
 
 	user := &User{
 		Username:     req.Username,

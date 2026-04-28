@@ -189,6 +189,27 @@ func TestLogin_UserNotFound(t *testing.T) {
 	}
 }
 
+func TestRegister_AdminRoleEscalation(t *testing.T) {
+	store := newMockUserStore()
+	svc := newTestAuthService(store)
+
+	// Attack: try to register with role=admin
+	user, err := svc.Register(context.Background(), &RegisterRequest{
+		Username: "hacker",
+		Password: "secret123",
+		Role:     "admin",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if user.Role == "admin" {
+		t.Error("SECURITY: user should NOT be able to self-assign admin role via registration")
+	}
+	if user.Role != "member" {
+		t.Errorf("role = %q, want %q", user.Role, "member")
+	}
+}
+
 func TestGenerateToken(t *testing.T) {
 	store := newMockUserStore()
 	svc := newTestAuthService(store)

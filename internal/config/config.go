@@ -56,6 +56,7 @@ type RateLimitRule struct {
 // RateLimitConfig 包含各端点的限流配置。
 type RateLimitConfig struct {
 	Submission RateLimitRule `yaml:"submission"` // Flag 提交限流规则
+	Auth       RateLimitRule `yaml:"auth"`      // 认证端点限流规则（注册/登录）
 }
 
 // LogConfig 定义日志输出配置。
@@ -102,6 +103,13 @@ func Load(path string) (*Config, error) {
 	if cfg.RateLimit.Submission.Window == 0 {
 		cfg.RateLimit.Submission.Window = 10 * time.Second
 	}
+	// 设置默认认证限流：1 分钟内最多 10 次请求
+	if cfg.RateLimit.Auth.Requests == 0 {
+		cfg.RateLimit.Auth.Requests = 10
+	}
+	if cfg.RateLimit.Auth.Window == 0 {
+		cfg.RateLimit.Auth.Window = 1 * time.Minute
+	}
 	// 设置默认日志级别
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
@@ -113,6 +121,18 @@ func Load(path string) (*Config, error) {
 	// 验证必填字段
 	if cfg.JWT.Secret == "" {
 		return nil, fmt.Errorf("jwt.secret is required")
+	}
+	if len(cfg.JWT.Secret) < 32 {
+		return nil, fmt.Errorf("jwt.secret must be at least 32 characters")
+	}
+	defaultSecrets := map[string]bool{
+		"change-me-in-production": true,
+		"secret":                  true,
+		"jwt-secret":              true,
+		"your-secret-key":         true,
+	}
+	if defaultSecrets[cfg.JWT.Secret] {
+		return nil, fmt.Errorf("jwt.secret must not be a known default value")
 	}
 	if cfg.DB.Host == "" {
 		return nil, fmt.Errorf("db.host is required")

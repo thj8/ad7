@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"time"
+
 	"github.com/go-chi/chi/v5"
 
 	"ad7/internal/middleware"
@@ -8,16 +10,26 @@ import (
 
 // RouteDeps 封装认证和队伍路由注册所需的依赖。
 type RouteDeps struct {
-	Auth    *middleware.Auth
-	AuthH   *AuthHandler
-	TeamH   *TeamHandler
+	Auth       *middleware.Auth
+	AuthH      *AuthHandler
+	TeamH      *TeamHandler
+	MaxBody    int64         // 请求体大小限制（字节）
+	AuthLimit  int           // 认证端点限流请求数
+	AuthWindow time.Duration // 认证端点限流时间窗口
 }
 
-// RegisterPublicRoutes 注册不需要认证的公共路由。
-// 路由：POST /register, POST /login
+// RegisterPublicRoutes 注册不需要认证的公共路由（带限流和 body 限制）。
 func RegisterPublicRoutes(r chi.Router, deps RouteDeps) {
-	r.Post("/register", deps.AuthH.Register)
-	r.Post("/login", deps.AuthH.Login)
+	r.Group(func(r chi.Router) {
+		if deps.MaxBody > 0 {
+			r.Use(middleware.MaxBodySize(deps.MaxBody))
+		}
+		if deps.AuthLimit > 0 && deps.AuthWindow > 0 {
+			r.Use(middleware.LimitAuthEndpoints(deps.AuthLimit, deps.AuthWindow))
+		}
+		r.Post("/register", deps.AuthH.Register)
+		r.Post("/login", deps.AuthH.Login)
+	})
 }
 
 // RegisterTeamRoutes 注册需要认证的队伍路由。

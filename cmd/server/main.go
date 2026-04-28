@@ -80,6 +80,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)    // 请求日志记录
 	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
+	r.Use(middleware.MaxBodySize(1 << 20)) // 1MB body 限制
 
 	// 注册 API v1 路由组（通过 router 包统一注册，需要 JWT）
 	router.RegisterAPIV1(r, router.RouteDeps{

@@ -47,7 +47,14 @@ func main() {
 	authH := auth.NewAuthHandler(authSvc)
 	teamH := auth.NewTeamHandler(teamSvc)
 	verifyH := auth.NewVerifyHandler(authSvc)
-	authDeps := auth.RouteDeps{Auth: authMW, AuthH: authH, TeamH: teamH}
+	authDeps := auth.RouteDeps{
+		Auth:       authMW,
+		AuthH:      authH,
+		TeamH:      teamH,
+		MaxBody:    1 << 20, // 1MB
+		AuthLimit:  cfg.RateLimit.Auth.Requests,
+		AuthWindow: cfg.RateLimit.Auth.Window,
+	}
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)

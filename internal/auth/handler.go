@@ -32,11 +32,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Role:     body.Role,
 	})
 	if err == ErrConflict {
-		authWriteError(w, http.StatusConflict, "username already exists")
+		// 不泄露用户名是否已存在，返回与验证失败相同的错误
+		authWriteError(w, http.StatusBadRequest, "registration failed")
 		return
 	}
 	if err != nil {
-		authWriteError(w, http.StatusBadRequest, err.Error())
+		authWriteError(w, http.StatusBadRequest, "registration failed")
 		return
 	}
 	authWriteJSON(w, http.StatusCreated, map[string]any{
@@ -65,7 +66,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		authWriteError(w, http.StatusInternalServerError, err.Error())
+		authWriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	authWriteJSON(w, http.StatusOK, map[string]any{
