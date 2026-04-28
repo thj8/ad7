@@ -45,6 +45,7 @@ BASE_URL=http://host:8080 JWT_SECRET=xxx ./scripts/test-leaderboard.sh
 go test ./...
 
 # 仅运行集成测试（需要 MySQL）
+souce .env
 go test ./internal/integration/... -v -count=1
 
 # 运行单个测试
