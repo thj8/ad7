@@ -241,6 +241,26 @@ func (h *TeamHandler) SetCaptain(w http.ResponseWriter, r *http.Request) {
 	authWriteJSON(w, http.StatusOK, map[string]any{"message": "ok"})
 }
 
+// GetUserTeams 处理 GET /api/v1/users/{userID}/teams 请求。
+func (h *TeamHandler) GetUserTeams(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	if len(userID) != 32 {
+		authWriteError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	teams, err := h.svc.GetUserTeamsInfo(r.Context(), userID)
+	if err != nil {
+		authWriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if teams == nil {
+		teams = []Team{}
+	}
+
+	authWriteJSON(w, http.StatusOK, map[string]any{"teams": teams})
+}
+
 // TransferCaptain 处理 POST /api/v1/admin/teams/{id}/transfer-captain 请求（管理员）。
 func (h *TeamHandler) TransferCaptain(w http.ResponseWriter, r *http.Request) {
 	teamID := chi.URLParam(r, "id")

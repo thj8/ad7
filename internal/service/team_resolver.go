@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -26,7 +27,8 @@ func NewTeamResolver(authURL string) *TeamResolver {
 
 // GetUserTeam 获取用户当前所在的队伍 ID。如果用户没有加入任何队伍，返回空字符串。
 func (r *TeamResolver) GetUserTeam(ctx context.Context, userID string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/api/v1/users/%s/teams", r.authURL, userID), nil)
+	url := fmt.Sprintf("%s/api/v1/users/%s/teams", r.authURL, userID)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -37,12 +39,20 @@ func (r *TeamResolver) GetUserTeam(ctx context.Context, userID string) (string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("read response body: %w", err)
+		}
+
 		var result struct {
 			Teams []struct {
 				ID string `json:"id"`
 			} `json:"teams"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && len(result.Teams) > 0 {
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return "", nil
+		}
+		if len(result.Teams) > 0 {
 			return result.Teams[0].ID, nil
 		}
 	}

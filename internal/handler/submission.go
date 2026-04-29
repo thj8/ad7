@@ -41,6 +41,7 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 	userID := middleware.UserID(r)
 	result, err := h.svc.SubmitInComp(r.Context(), &service.SubmitInCompRequest{
 		UserID:        userID,
+		Username:      middleware.Username(r),
 		CompetitionID: compID,
 		ChallengeID:   chalID,
 		Flag:          body.Flag,

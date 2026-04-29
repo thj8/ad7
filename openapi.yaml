@@ -47,7 +47,6 @@ components:
         updated_at: { type: string, format: date-time }
         username:   { type: string }
         role:       { type: string }
-        team_id:    { type: string, description: 所属队伍 res_id，可为空 }
 
     Team:
       type: object
@@ -57,6 +56,14 @@ components:
         updated_at:  { type: string, format: date-time }
         name:        { type: string }
         description: { type: string }
+
+    MemberInfo:
+      type: object
+      properties:
+        user_id:   { type: string, description: 用户 res_id }
+        username:  { type: string, description: 用户名 }
+        role:      { type: string, description: 角色：captain 或 member }
+        joined_at: { type: string, format: date-time, description: 加入时间 }
 
     # ── CTF schemas ──
 
@@ -316,6 +323,37 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/users/{userID}/teams:
+    get:
+      summary: 获取用户所属的队伍列表
+      description: 无需认证，返回用户所属的所有队伍信息
+      security: []
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema: { type: string }
+          description: 用户 res_id
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Team'
+        '400':
+          description: userID 无效
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # ─── Auth - 队伍路由（需认证） ───
 
   /api/v1/teams:
@@ -384,9 +422,14 @@ paths:
                   members:
                     type: array
                     items:
-                      $ref: '#/components/schemas/User'
+                      $ref: '#/components/schemas/MemberInfo'
         '401':
           description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -531,7 +574,7 @@ paths:
   /api/v1/admin/teams/{id}/members/{user_id}:
     delete:
       summary: 移除队伍成员
-      description: 需要 admin 角色
+      description: 需要 admin 角色。不能移除有其他成员的队伍的队长
       servers:
         - url: http://localhost:8081
       parameters:
@@ -544,6 +587,11 @@ paths:
       responses:
         '204':
           description: 移除成功
+        '400':
+          description: 不能移除队长（需先转移队长）或用户不是成员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '401':
           description: 未认证
           content:
@@ -551,6 +599,105 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
           description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/teams/{id}/captain:
+    put:
+      summary: 设置队伍队长
+      description: 需要 admin 角色。将指定成员设置为队长，原队长降为成员
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, description: 新队长用户 res_id }
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: ok }
+        '400':
+          description: 参数错误或用户不是队伍成员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/admin/teams/{id}/transfer-captain:
+    post:
+      summary: 转移队长权限
+      description: 需要 admin 角色。当前用户必须是队长才能转移给其他成员
+      servers:
+        - url: http://localhost:8081
+      parameters:
+        - $ref: '#/components/parameters/ResID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_user_id]
+              properties:
+                to_user_id: { type: string, description: 目标成员用户 res_id }
+      responses:
+        '200':
+          description: 转移成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: ok }
+        '400':
+          description: 参数错误、当前用户不是队长或目标不是成员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: 未认证
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: 非管理员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 队伍不存在
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

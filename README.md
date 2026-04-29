@@ -21,6 +21,7 @@
 - **插件系统** — 可扩展的编译时插件接口，用于添加新功能
 - **UUID ID** — 所有公开 ID 使用 UUID v4（32字符十六进制字符串无连字符）作为唯一标识符
 - **独立认证服务** — 认证服务器独立部署，支持用户注册/登录、队伍管理、队长权限
+- **通用内存缓存** — 泛型 TTL 缓存层，支持懒淘汰和后台清理，`GetOrSet` 简化缓存集成
 
 ## 快速开始
 
@@ -189,6 +190,7 @@ CTF 服务器 (端口 8080)
 │   └── seed/             # 测试数据生成器
 ├── internal/
 │   ├── auth/             # 认证模块（用户、队伍、JWT）
+│   ├── cache/            # 泛型内存缓存（TTL、GetOrSet）
 │   ├── config/           # YAML 配置加载
 │   ├── handler/          # HTTP 处理器
 │   ├── middleware/       # 认证、速率限制
@@ -230,6 +232,10 @@ db:
 jwt:
   secret: "your-secret-key"
   admin_role: "admin"
+
+cache:
+  default_ttl: 5m
+  cleanup_interval: 10m
 ```
 
 ## 许可证

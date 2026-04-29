@@ -319,3 +319,26 @@ func (s *TeamService) TransferCaptain(ctx context.Context, teamID, fromUserID, t
 	// 使用 SetCaptain 完成转移
 	return s.SetCaptain(ctx, teamID, toUserID)
 }
+
+// GetUserTeamsInfo 查询用户所属的所有队伍信息，返回完整的 Team 列表。
+func (s *TeamService) GetUserTeamsInfo(ctx context.Context, userID string) ([]Team, error) {
+	tms, err := s.teamMembers.GetUserTeams(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(tms) == 0 {
+		return []Team{}, nil
+	}
+
+	var result []Team
+	for _, tm := range tms {
+		t, err := s.teams.GetTeamByID(ctx, tm.TeamID)
+		if err != nil {
+			continue
+		}
+		if t != nil {
+			result = append(result, *t)
+		}
+	}
+	return result, nil
+}

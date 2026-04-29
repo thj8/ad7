@@ -18,6 +18,7 @@ type Config struct {
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Log       LogConfig       `yaml:"log"`
 	Auth      AuthConfig      `yaml:"auth"`
+	Cache     CacheConfig     `yaml:"cache"`
 }
 
 // ServerConfig 定义 HTTP 服务器的监听端口。
@@ -69,6 +70,12 @@ type AuthConfig struct {
 	URL string `yaml:"url"` // 认证服务地址，如 "http://localhost:8081"
 }
 
+// CacheConfig 定义缓存参数。
+type CacheConfig struct {
+	DefaultTTL       time.Duration `yaml:"default_ttl"`        // 默认缓存生存时间
+	CleanupInterval  time.Duration `yaml:"cleanup_interval"`   // 后台清理间隔，0 表示不启动后台清理
+}
+
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
 // 参数：
 //   - path: 配置文件的文件系统路径
@@ -109,6 +116,13 @@ func Load(path string) (*Config, error) {
 	// 设置默认认证服务地址
 	if cfg.Auth.URL == "" {
 		cfg.Auth.URL = "http://localhost:8081"
+	}
+	// 设置默认缓存参数
+	if cfg.Cache.DefaultTTL == 0 {
+		cfg.Cache.DefaultTTL = 5 * time.Minute
+	}
+	if cfg.Cache.CleanupInterval == 0 {
+		cfg.Cache.CleanupInterval = 10 * time.Minute
 	}
 	// 验证必填字段
 	if cfg.JWT.Secret == "" {

@@ -20,7 +20,7 @@ import (
 	"ad7/internal/service"
 	"ad7/internal/store"
 	"ad7/plugins/analytics"
-
+	"ad7/plugins/cache"
 	"ad7/plugins/hints"
 	"ad7/plugins/leaderboard"
 	"ad7/plugins/notification"
@@ -91,8 +91,9 @@ func main() {
 		SubmissionH:  submissionH,
 	})
 
-	// 初始化所有插件
+	// 初始化所有插件（注意顺序：缓存插件最先加载）
 	plugins := []plugin.Plugin{
+		cache.New(),         // 缓存插件（最先加载，供其他插件使用）
 		leaderboard.New(),  // 排行榜插件
 		notification.New(), // 通知插件
 		analytics.New(),    // 分析插件
@@ -109,6 +110,11 @@ func main() {
 	// 注册所有插件路由，传递依赖映射
 	for _, p := range plugins {
 		p.Register(r, st.DB(), authMW, pluginMap)
+	}
+
+	// 确保缓存插件在关闭时停止
+	if cp, ok := pluginMap[plugin.NameCache].(*cache.Plugin); ok {
+		defer cp.Stop()
 	}
 
 	// 启动 HTTP 服务器

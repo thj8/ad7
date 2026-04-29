@@ -6,4 +6,5 @@ const (
 	NameHints        = "hints"
 	NameAnalytics    = "analytics"
 	NameTopThree     = "topthree"
+	NameCache        = "cache"
 )

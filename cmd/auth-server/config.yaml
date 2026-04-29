@@ -12,5 +12,11 @@ jwt:
   secret: "dev-only-secret-change-in-production-abc123"
   admin_role: "admin"
 
+rate_limit:
+  auth:
+    requests: 10
+    window: 1m
+
 log:
   level: "info"
+  path: "logs/auth-server.log"

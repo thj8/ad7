@@ -214,7 +214,7 @@ func TestGenerateToken(t *testing.T) {
 	store := newMockUserStore()
 	svc := newTestAuthService(store)
 
-	token, err := svc.GenerateToken("user123", "admin")
+	token, err := svc.GenerateToken("user123", "testuser", "admin")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}

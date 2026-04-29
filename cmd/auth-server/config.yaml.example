@@ -1,0 +1,22 @@
+server:
+  port: 8081
+
+db:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: ""
+  dbname: ctf
+
+jwt:
+  secret: "change-me-in-production"
+  admin_role: "admin"
+
+rate_limit:
+  auth:
+    requests: 10
+    window: 1m
+
+log:
+  # path: "logs/auth-server.log"    # 日志文件路径，注释掉则仅输出到 stdout
+  level: "info"                      # debug / info / warn / error

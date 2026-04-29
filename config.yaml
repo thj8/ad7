@@ -16,3 +16,14 @@ rate_limit:
   submission:
     requests: 3
     window: 10s
+
+auth:
+  url: http://localhost:8081
+
+cache:
+  default_ttl: 5m
+  cleanup_interval: 10m
+
+log:
+  path: "logs/server.log"
+  level: "info"

@@ -13,7 +13,7 @@ func TestVerify_ValidToken(t *testing.T) {
 	svc := newTestAuthService(store)
 	handler := NewVerifyHandler(svc)
 
-	token, err := svc.GenerateToken("user123", "member")
+	token, err := svc.GenerateToken("user123", "testuser", "member")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestVerify_ExpiredToken(t *testing.T) {
 	}
 	handler := NewVerifyHandler(svc)
 
-	token, _ := svc.GenerateToken("user123", "member")
+	token, _ := svc.GenerateToken("user123", "testuser", "member")
 
 	req := httptest.NewRequest("POST", "/api/v1/verify", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

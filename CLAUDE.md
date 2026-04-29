@@ -56,7 +56,8 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_m
 - `internal/store/` — `store.go` 定义接口；`mysql.go` 单个 `*Store` 实现所有接口
 - `internal/service/` — 业务逻辑层。`SubmissionService.SubmitInComp` 在正确提交时发布 `EventCorrectSubmission`
 - `internal/handler/` — HTTP 层，使用单独的请求结构体接收 `json:"-"` 的字段
-- `internal/config/` — YAML 配置（`server.port`、`db.*`、`auth.url`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`）
+- `internal/config/` — YAML 配置（`server.port`、`db.*`、`auth.url`、`jwt.secret`、`jwt.admin_role`、`log.*`、`ratelimit.*`、`cache.*`）
+- `internal/cache/` — 泛型内存缓存，支持 TTL 过期、懒淘汰、后台清理、`GetOrSet` 封装函数调用
 - `internal/uuid/` — UUID v4 生成器（32字符十六进制，无连字符）
 - `internal/logger/` — 基于 `log/slog` 的双输出日志（stdout + 可选文件），支持级别配置
 - `internal/auth/` — 认证模块：用户注册/登录、JWT token 签发和验证、队伍 CRUD + 成员管理。独立运行在 `cmd/auth-server/` 中，通过 HTTP 接口提供服务。使用 `team_members` 关联表管理用户-队伍关系，支持 `captain`/`member` 角色
@@ -108,6 +109,7 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_m
 `internal/integration/` 连接真实 MySQL。`testutil.NewTestEnv` 启动两个 httptest.Server：一个 auth 服务（模拟认证服务器）和一个 CTF 服务。每个测试调用 `Cleanup(t)` 按依赖顺序清除数据（含 users、teams 表）。`TEST_DSN` 环境变量配置数据库连接。
 
 ## 约束
+- **避免造轮子**: 写什么功能先查询github有没有开源的模块，有的话直接参考或者直接使用
 - **auth模块**: 独立 HTTP 服务（`cmd/auth-server/`），CTF 项目通过 `POST /api/v1/verify` 验证 token。CTF 中间件不解析 JWT，仅通过 HTTP 调用 auth 服务。可替换为其他兼容的 auth 服务
 - **双服务架构**: CTF 服务器（端口 8080）和认证服务器（端口 8081）共享同一个 MySQL 数据库，通过 HTTP 通信
 - **新功能**: 每次添加新功能，都必须添加完整的测试用例

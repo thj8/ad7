@@ -25,13 +25,14 @@ func (h *VerifyHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenStr := strings.TrimPrefix(header, "Bearer ")
 
-	userID, role, err := h.svc.VerifyToken(tokenStr)
+	userID, username, role, err := h.svc.VerifyToken(tokenStr)
 	if err != nil {
 		authWriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid token"})
 		return
 	}
 	authWriteJSON(w, http.StatusOK, map[string]string{
-		"user_id": userID,
-		"role":    role,
+		"user_id":  userID,
+		"username": username,
+		"role":     role,
 	})
 }

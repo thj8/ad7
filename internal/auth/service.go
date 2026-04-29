@@ -109,21 +109,22 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (string, err
 		return "", ErrUnauthorized
 	}
 
-	return s.GenerateToken(user.ResID, user.Role)
+	return s.GenerateToken(user.ResID, user.Username, user.Role)
 }
 
 // GenerateToken 生成 JWT token。
-func (s *AuthService) GenerateToken(userID, role string) (string, error) {
+func (s *AuthService) GenerateToken(userID, username, role string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":  userID,
-		"role": role,
-		"exp":  time.Now().Add(s.tokenTTL).Unix(),
+		"sub":      userID,
+		"username": username,
+		"role":     role,
+		"exp":      time.Now().Add(s.tokenTTL).Unix(),
 	})
 	return token.SignedString(s.secret)
 }
 
-// VerifyToken 验证 JWT token，返回 user_id 和 role。
-func (s *AuthService) VerifyToken(tokenStr string) (string, string, error) {
+// VerifyToken 验证 JWT token，返回 user_id、username 和 role。
+func (s *AuthService) VerifyToken(tokenStr string) (string, string, string, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
@@ -131,16 +132,17 @@ func (s *AuthService) VerifyToken(tokenStr string) (string, string, error) {
 		return s.secret, nil
 	})
 	if err != nil || !token.Valid {
-		return "", "", err
+		return "", "", "", err
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", "", jwt.ErrSignatureInvalid
+		return "", "", "", jwt.ErrSignatureInvalid
 	}
 	userID, _ := claims["sub"].(string)
+	username, _ := claims["username"].(string)
 	role, _ := claims["role"].(string)
 	if userID == "" || role == "" {
-		return "", "", jwt.ErrSignatureInvalid
+		return "", "", "", jwt.ErrSignatureInvalid
 	}
-	return userID, role, nil
+	return userID, username, role, nil
 }

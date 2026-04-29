@@ -20,3 +20,10 @@ rate_limit:
 log:
   # path: "logs/server.log"    # 日志文件路径，注释掉则仅输出到 stdout
   level: "info"                # debug / info / warn / error
+
+auth:
+  url: "http://localhost:8081" # 认证服务地址
+
+cache:
+  default_ttl: 5m              # 默认缓存过期时间
+  cleanup_interval: 10m        # 后台清理间隔，0 表示不启动后台清理

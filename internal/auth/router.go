@@ -19,6 +19,7 @@ type RouteDeps struct {
 
 // RegisterPublicRoutes 注册不需要认证的公共路由（带限流）。
 func RegisterPublicRoutes(r chi.Router, deps RouteDeps) {
+	// Rate limited endpoints (register/login)
 	r.Group(func(r chi.Router) {
 		if deps.AuthLimit > 0 && deps.AuthWindow > 0 {
 			r.Use(middleware.LimitByIP(deps.AuthLimit, deps.AuthWindow))
@@ -26,6 +27,9 @@ func RegisterPublicRoutes(r chi.Router, deps RouteDeps) {
 		r.Post("/register", deps.AuthH.Register)
 		r.Post("/login", deps.AuthH.Login)
 	})
+
+	// No rate limit on team lookup
+	r.Get("/users/{userID}/teams", deps.TeamH.GetUserTeams)
 }
 
 // RegisterTeamRoutes 注册需要认证的队伍路由。

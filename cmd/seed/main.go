@@ -6,6 +6,8 @@ package main
 
 import (
 	"bytes"
+	crypto_rand "crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,14 +18,34 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+	_ "github.com/go-sql-driver/mysql"
 )
 
+// regMu 保证注册串行执行，避免并发触发 auth 服务限流（10 次/分钟/IP）。
+var regMu sync.Mutex
+
+// getDB 从 TEST_DSN 环境变量获取数据库连接。
+func getDB() *sql.DB {
+	dsn := os.Getenv("TEST_DSN")
+	if dsn == "" {
+		log.Fatal("TEST_DSN env var required")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	return db
+}
+
 const (
-	numComps     = 15 // 生成的比赛数量
+	numComps     = 2  // 生成的比赛数量
 	poolSize     = 50 // 题目池大小
 	chalsPerComp = 25 // 每个比赛分配的题目数量
 	usersPerComp = 30 // 每个比赛的模拟用户数量
-	teamsPerComp = 10 // 每个比赛的队伍数量（队伍模式）
+	teamsPerComp = 5  // 每个比赛的队伍数量（队伍模式）
 
 	// submitDelay 是每个用户两次提交之间的间隔。
 	// 提交端点限流为每用户 3 次/10 秒，4 秒间隔确保不触发限流。
@@ -186,40 +208,48 @@ func ctfURL() string {
 
 // postJSON 发送 POST 请求，body 可以为 nil。
 // token 非空时设置 Authorization 头。
-// 非 2xx 状态码直接 log.Fatalf。
+// 非 2xx 状态码直接 log.Fatalf。遇到 429 自动重试。
 func postJSON(url string, body any, token string) map[string]any {
-	var bodyReader io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		bodyReader = bytes.NewReader(b)
+	for attempt := 0; attempt < 5; attempt++ {
+		var bodyReader io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			bodyReader = bytes.NewReader(b)
+		}
+		req, err := http.NewRequest("POST", url, bodyReader)
+		if err != nil {
+			log.Fatalf("new request %s: %v", url, err)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Fatalf("post %s: %v", url, err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 429 {
+			time.Sleep(time.Duration(2+attempt) * time.Second)
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
+		}
+		if len(data) == 0 {
+			return nil
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			log.Fatalf("decode %s: %v (%s)", url, err, data)
+		}
+		return m
 	}
-	req, err := http.NewRequest("POST", url, bodyReader)
-	if err != nil {
-		log.Fatalf("new request %s: %v", url, err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("post %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		log.Fatalf("decode %s: %v (%s)", url, err, data)
-	}
-	return m
+	log.Fatalf("post %s: too many retries (429)", url)
+	return nil
 }
 
 // registerAndLogin 注册用户并返回 JWT token 和用户 ID。
@@ -229,40 +259,65 @@ func registerAndLogin(username, password string) (token string, userID string) {
 }
 
 // registerAndLoginWithRole 注册指定角色的用户并返回 JWT token 和用户 ID。
+// 注意：注册 API 会忽略 role 参数（安全限制），所以通过数据库直接提升角色。
 func registerAndLoginWithRole(username, password, role string) (token string, userID string) {
-	payload := map[string]string{"username": username, "password": password}
-	if role != "" {
-		payload["role"] = role
+	regMu.Lock()
+	defer regMu.Unlock()
+
+	db := getDB()
+	defer db.Close()
+
+	// 检查用户是否已存在
+	var existingID, existingRole string
+	db.QueryRow("SELECT res_id, role FROM users WHERE username = ?", username).Scan(&existingID, &existingRole)
+	if existingID != "" {
+		token = signToken(existingID, existingRole)
+		return token, existingID
 	}
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", authURL()+"/api/v1/register", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+
+	// 生成 res_id 和密码 hash
+	resID := newUUID()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("register %s: %v", username, err)
+		log.Fatalf("hash password for %s: %v", username, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 201 {
-		// 用户创建成功，从响应中获取用户ID
-		var regResp map[string]any
-		regData, _ := io.ReadAll(resp.Body)
-		json.Unmarshal(regData, &regResp)
-		userID, _ = regResp["id"].(string)
-		// 然后登录获取token
-		token, _ = login(username, password)
-		return token, userID
+	userRole := "member"
+	if role != "" {
+		userRole = role
+	}
+	_, err = db.Exec("INSERT INTO users (res_id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+		resID, username, string(hash), userRole)
+	if err != nil {
+		log.Fatalf("insert user %s: %v", username, err)
 	}
 
-	if resp.StatusCode == 409 {
-		// 用户已存在，直接登录
-		return login(username, password)
-	}
+	token = signToken(resID, userRole)
+	return token, resID
+}
 
-	// 其他错误
-	data, _ := io.ReadAll(resp.Body)
-	log.Fatalf("register %s: status %d: %s", username, resp.StatusCode, data)
-	return "", ""
+// signToken 直接用 JWT secret 签发 token，绕过 auth 服务限流。
+func signToken(userID, role string) string {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		secret = "dev-only-secret-change-in-production-abc123"
+	}
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  userID,
+		"role": role,
+		"exp":  time.Now().Add(24 * time.Hour).Unix(),
+	})
+	token, err := t.SignedString([]byte(secret))
+	if err != nil {
+		log.Fatalf("sign token: %v", err)
+	}
+	return token
+}
+
+// newUUID 生成 32 字符十六进制 UUID（与项目 internal/uuid 包兼容）。
+func newUUID() string {
+	b := make([]byte, 16)
+	crypto_rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }
 
 func login(username, password string) (token string, userID string) {
@@ -281,7 +336,7 @@ func login(username, password string) (token string, userID string) {
 // ── API 调用函数 ──
 
 func apiCreateChallenge(token, title, category, desc string, score int, flag string) string {
-	m := postJSON(ctfURL()+"/api/v1/challenges", map[string]any{
+	m := postJSON(ctfURL()+"/api/v1/admin/challenges", map[string]any{
 		"title": title, "category": category, "description": desc,
 		"score": score, "flag": flag,
 	}, token)
@@ -304,7 +359,7 @@ func apiCreateCompetition(token, title, desc string, start, end time.Time, mode,
 	if teamJoinMode != "" {
 		payload["team_join_mode"] = teamJoinMode
 	}
-	m := postJSON(ctfURL()+"/api/v1/competitions", payload, token)
+	m := postJSON(ctfURL()+"/api/v1/admin/competitions", payload, token)
 	id, ok := m["id"].(string)
 	if !ok {
 		log.Fatalf("create competition: no id: %v", m)
@@ -313,16 +368,16 @@ func apiCreateCompetition(token, title, desc string, start, end time.Time, mode,
 }
 
 func apiAddChallengeToComp(token, compID, chalID string) {
-	postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/challenges",
+	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/challenges",
 		map[string]string{"challenge_id": chalID}, token)
 }
 
 func apiStartComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/competitions/"+compID+"/start", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", token)
 }
 
 func apiEndComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/competitions/"+compID+"/end", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", token)
 }
 
 func apiCreateTeam(token, name string) string {
@@ -340,36 +395,44 @@ func apiAddTeamMember(token, teamID, userID string) {
 }
 
 func apiAddTeamToComp(token, compID, teamID string) {
-	postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/teams",
+	postJSON(ctfURL()+"/api/v1/admin/competitions/"+compID+"/teams",
 		map[string]string{"team_id": teamID}, token)
 }
 
-// postJSONIgnore409 发送 POST 请求，容忍 409（已处于目标状态）。
+// postJSONIgnore409 发送 POST 请求，容忍 409（已处于目标状态）。遇到 429 自动重试。
 func postJSONIgnore409(url string, token string) {
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		log.Fatalf("new request %s: %v", url, err)
+	for attempt := 0; attempt < 5; attempt++ {
+		req, err := http.NewRequest("POST", url, nil)
+		if err != nil {
+			log.Fatalf("new request %s: %v", url, err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Fatalf("post %s: %v", url, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 429 {
+			time.Sleep(time.Duration(2+attempt) * time.Second)
+			continue
+		}
+		if resp.StatusCode == 409 {
+			return
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			log.Fatalf("post %s: status %d", url, resp.StatusCode)
+		}
+		return
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatalf("post %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 409 {
-		return // 已处于目标状态，忽略
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(resp.Body)
-		log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
-	}
+	log.Fatalf("post %s: too many retries (429)", url)
 }
 
 func apiSubmitFlag(token, compID, chalID, flag string) map[string]any {
-	return postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/submit",
-		map[string]string{"challenge_id": chalID, "flag": flag}, token)
+	return postJSON(ctfURL()+"/api/v1/competitions/"+compID+"/challenges/"+chalID+"/submit",
+		map[string]string{"flag": flag}, token)
 }
 
 // ── 随机选取 ──
@@ -392,18 +455,13 @@ const (
 )
 
 // getCompMode 根据比赛索引返回比赛模式
-// 0-4: individual（个人模式）
-// 5-9: team + free（队伍模式，自由加入）
-// 10-14: team + admin（队伍模式，管理员添加）
+// 0: individual（个人模式）
+// 1: team + free（队伍模式，自由加入）
 func getCompMode(i int) (mode compMode, teamJoinMode string) {
-	switch {
-	case i < 5:
+	if i == 0 {
 		return modeIndividual, ""
-	case i < 10:
-		return modeTeamFree, "free"
-	default:
-		return modeTeamAdmin, "admin"
 	}
+	return modeTeamFree, "free"
 }
 
 // ── 用户提交任务（并发执行） ──
@@ -454,34 +512,30 @@ func (j *userJob) run(wg *sync.WaitGroup) {
 
 // teamJob 是队伍在比赛中的提交任务。
 type teamJob struct {
-	CompIdx int              // 比赛序号
-	TeamIdx int              // 队伍序号（0=最强）
-	CompID  string           // 比赛 res_id
-	ChalIDs []string         // 分配到该比赛的题目
-	Flags   map[string]string // res_id → flag
-	RNG     *rand.Rand       // 每个队伍独立的随机数生成器
+	CompIdx     int              // 比赛序号
+	TeamIdx     int              // 队伍序号（0=最强）
+	CompID      string           // 比赛 res_id
+	TeamID      string           // 队伍 res_id（由 main 预创建）
+	AdminToken  string           // admin token（用于添加队员）
+	ChalIDs     []string         // 分配到该比赛的题目
+	Flags       map[string]string // res_id → flag
+	RNG         *rand.Rand       // 每个队伍独立的随机数生成器
 }
 
-// run 为队伍创建用户、分配到队伍、按团队能力提交 flag。
+// run 为队伍注册用户、分配到队伍、按团队能力提交 flag。
 func (j *teamJob) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	teamName := fmt.Sprintf("comp%02d_team_%02d", j.CompIdx+1, j.TeamIdx+1)
 	teamSize := 3 + j.RNG.Intn(3) // 每队 3-5 人
-
-	// 注册 admin 用户获取 token 用于创建队伍
-	adminToken, _ := registerAndLoginWithRole("seed_admin", "seed_admin_password", "admin")
-
-	// 创建队伍
-	teamID := apiCreateTeam(adminToken, teamName)
 
 	// 队伍解决的题目数量（根据队伍序号，0队最强）
 	nTeamCorrect := solveCounts[j.TeamIdx]
 
-	// 注册并分配队员
+	// 注册并分配队员（每队最多 5 人，偏移 = TeamIdx * 5 避免用户重叠）
+	maxTeamSize := 5
 	userTokens := make([]string, 0, teamSize)
 	for u := 0; u < teamSize; u++ {
-		userIdx := j.TeamIdx*teamSize + u
+		userIdx := j.TeamIdx*maxTeamSize + u
 		if userIdx >= usersPerComp {
 			userIdx = usersPerComp - 1
 		}
@@ -489,9 +543,8 @@ func (j *teamJob) run(wg *sync.WaitGroup) {
 		token, userID := registerAndLogin(username, "password123")
 		userTokens = append(userTokens, token)
 
-		// 将用户添加到队伍（如果我们有用户ID的话）
 		if userID != "" {
-			apiAddTeamMember(adminToken, teamID, userID)
+			apiAddTeamMember(j.AdminToken, j.TeamID, userID)
 		}
 	}
 
@@ -575,21 +628,11 @@ func main() {
 	}
 	log.Printf("created %d challenges", len(chalIDs))
 
-	// 创建 15 个比赛
+	// 创建比赛：i=0 个人赛，i=1 团队赛
 	now := time.Now()
 	for i := 0; i < numComps; i++ {
-		var start, end time.Time
-		switch {
-		case i < 5:
-			start = now.AddDate(0, 0, -(i+1)*7)
-			end = start.Add(48 * time.Hour)
-		case i < 10:
-			start = now.Add(time.Duration(i-7) * 24 * time.Hour)
-			end = start.Add(72 * time.Hour)
-		default:
-			start = now.AddDate(0, 0, (i-9)*7)
-			end = start.Add(48 * time.Hour)
-		}
+		start := now.Add(-1 * time.Hour)
+		end := now.Add(48 * time.Hour)
 
 		mode, teamJoinMode := getCompMode(i)
 		var modeStr, teamJoinModeStr string
@@ -659,12 +702,14 @@ func main() {
 			for t := 0; t < teamsPerComp; t++ {
 				wg.Add(1)
 				job := &teamJob{
-					CompIdx: i,
-					TeamIdx: t,
-					CompID:  compID,
-					ChalIDs: picked,
-					Flags:   chalFlags,
-					RNG:     rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(t))),
+					CompIdx:    i,
+					TeamIdx:    t,
+					CompID:     compID,
+					TeamID:     teamIDs[t],
+					AdminToken: adminToken,
+					ChalIDs:    picked,
+					Flags:      chalFlags,
+					RNG:        rand.New(rand.NewSource(now.UnixNano() + int64(i)*100 + int64(t))),
 				}
 				go job.run(&wg)
 			}

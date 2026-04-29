@@ -117,3 +117,8 @@ func Warn(msg string, args ...any) {
 func Error(msg string, args ...any) {
 	slog.Error(msg, args...)
 }
+
+// Debug 记录 Debug 级别日志。
+func Debug(msg string, args ...any) {
+	slog.Debug(msg, args...)
+}
