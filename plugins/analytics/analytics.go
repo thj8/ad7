@@ -4,6 +4,7 @@
 package analytics
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
@@ -14,10 +15,14 @@ import (
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
+	"ad7/plugins/cache"
 )
 
-// Plugin 是分析插件，持有数据库连接。
-type Plugin struct{ db *sql.DB }
+// Plugin 是分析插件，持有数据库连接和缓存提供器。
+type Plugin struct {
+	db   *sql.DB
+	cache cache.Provider
+}
 
 // New 创建分析插件实例。
 func New() *Plugin { return &Plugin{} }
@@ -35,6 +40,12 @@ func (p *Plugin) Name() string {
 //   - GET /api/v1/competitions/{id}/analytics/challenges（题目统计）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+	// 从依赖中获取缓存插件
+	if cachePlugin, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cachePlugin.(cache.Provider); ok {
+			p.cache = provider
+		}
+	}
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/overview", p.overview)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/categories", p.byCategory)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/users", p.userStats)
@@ -126,7 +137,20 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	cached, err := pluginutil.WithCache(p.cache, "analytics:overview:"+compID, func() (any, error) {
+		return p.getOverviewFromDB(r.Context(), compID)
+	})
+
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	pluginutil.WriteJSON(w, http.StatusOK, cached.(overviewResponse))
+}
+
+// getOverviewFromDB 从数据库获取比赛总览分析数据
+func (p *Plugin) getOverviewFromDB(ctx context.Context, compID string) (overviewResponse, error) {
 	var resp overviewResponse
 
 	// 获取比赛模式
@@ -135,15 +159,13 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
 	`, compID).Scan(&mode)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return overviewResponse{}, err
 	}
 
 	// 查询比赛中的题目总数
 	totalChallenges, err := pluginutil.GetCompChallengeCount(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return overviewResponse{}, err
 	}
 	resp.TotalChallenges = totalChallenges
 
@@ -152,8 +174,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		// 查询有提交记录的队伍数
 		totalTeams, err := pluginutil.GetCompDistinctTeams(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return overviewResponse{}, err
 		}
 		resp.TotalTeams = totalTeams
 		totalEntities = totalTeams
@@ -161,8 +182,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 		// 查询有提交记录的用户数
 		totalUsers, err := pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return overviewResponse{}, err
 		}
 		resp.TotalUsers = totalUsers
 		totalEntities = totalUsers
@@ -171,8 +191,7 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	// 查询总提交数和正确提交数
 	totalSubs, correctSubs, err := pluginutil.GetCompSubmitStats(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return overviewResponse{}, err
 	}
 	resp.TotalSubmissions = totalSubs
 	resp.CorrectSubmissions = correctSubs
@@ -204,12 +223,11 @@ func (p *Plugin) overview(w http.ResponseWriter, r *http.Request) {
 	// 计算平均解题时间（从比赛开始到首次正确提交的平均秒数）
 	avgSolveTime, err := pluginutil.GetAverageSolveTimeFromStart(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return overviewResponse{}, err
 	}
 	resp.AverageSolveTime = strconv.FormatFloat(avgSolveTime, 'f', 2, 64)
 
-	pluginutil.WriteJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // byCategory 处理按分类统计的请求。
@@ -220,16 +238,27 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	cached, err := pluginutil.WithCache(p.cache, "analytics:categories:"+compID, func() (any, error) {
+		return p.getCategoryFromDB(r.Context(), compID)
+	})
 
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	pluginutil.WriteJSON(w, http.StatusOK, cached.(categoryResponse))
+}
+
+// getCategoryFromDB 从数据库获取按分类统计数据
+func (p *Plugin) getCategoryFromDB(ctx context.Context, compID string) (categoryResponse, error) {
 	// 获取比赛模式
 	var mode string
 	err := p.db.QueryRowContext(ctx, `
 		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
 	`, compID).Scan(&mode)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return categoryResponse{}, err
 	}
 
 	var totalEntities int
@@ -239,15 +268,13 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		totalEntities, err = pluginutil.GetCompDistinctUsers(ctx, p.db, compID)
 	}
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return categoryResponse{}, err
 	}
 
 	// 使用共享查询函数获取各分类统计
 	catStats, err := pluginutil.GetCategoryStats(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return categoryResponse{}, err
 	}
 
 	var categories []categoryStats
@@ -289,7 +316,7 @@ func (p *Plugin) byCategory(w http.ResponseWriter, r *http.Request) {
 		categories = []categoryStats{}
 	}
 
-	pluginutil.WriteJSON(w, http.StatusOK, categoryResponse{Categories: categories})
+	return categoryResponse{Categories: categories}, nil
 }
 
 // userStats 处理用户/队伍统计请求。
@@ -300,16 +327,27 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	cached, err := pluginutil.WithCache(p.cache, "analytics:users:"+compID, func() (any, error) {
+		return p.getUserStatsFromDB(r.Context(), compID)
+	})
 
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	pluginutil.WriteJSON(w, http.StatusOK, cached.(userStatsResponse))
+}
+
+// getUserStatsFromDB 从数据库获取用户/队伍统计数据
+func (p *Plugin) getUserStatsFromDB(ctx context.Context, compID string) (userStatsResponse, error) {
 	// 获取比赛模式
 	var mode string
 	err := p.db.QueryRowContext(ctx, `
 		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
 	`, compID).Scan(&mode)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return userStatsResponse{}, err
 	}
 
 	resp := userStatsResponse{}
@@ -317,8 +355,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		// 使用共享查询函数获取队伍完整统计
 		teamFullStats, err := pluginutil.GetTeamFullStats(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return userStatsResponse{}, err
 		}
 
 		var teams []teamStats
@@ -349,8 +386,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		// 使用共享查询函数获取用户完整统计
 		userFullStats, err := pluginutil.GetUserFullStats(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return userStatsResponse{}, err
 		}
 
 		var users []userStats
@@ -379,7 +415,7 @@ func (p *Plugin) userStats(w http.ResponseWriter, r *http.Request) {
 		resp.Users = users
 	}
 
-	pluginutil.WriteJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // challengeStats 处理题目统计请求。
@@ -390,30 +426,39 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	cached, err := pluginutil.WithCache(p.cache, "analytics:challenges:"+compID, func() (any, error) {
+		return p.getChallengeStatsFromDB(r.Context(), compID)
+	})
 
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	pluginutil.WriteJSON(w, http.StatusOK, cached.(challengeStatsResponse))
+}
+
+// getChallengeStatsFromDB 从数据库获取题目统计数据
+func (p *Plugin) getChallengeStatsFromDB(ctx context.Context, compID string) (challengeStatsResponse, error) {
 	// 获取比赛模式
 	var mode string
 	err := p.db.QueryRowContext(ctx, `
 		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
 	`, compID).Scan(&mode)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return challengeStatsResponse{}, err
 	}
 
 	// 查询比赛中所有题目（使用共享查询函数）
 	challenges, err := pluginutil.GetCompChallenges(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return challengeStatsResponse{}, err
 	}
 
 	// 获取所有题目的完整统计
 	challengeFullStats, err := pluginutil.GetChallengeFullStats(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return challengeStatsResponse{}, err
 	}
 
 	// 构建 challengeID -> stat 的映射
@@ -467,5 +512,5 @@ func (p *Plugin) challengeStats(w http.ResponseWriter, r *http.Request) {
 		result = []challengeStats{}
 	}
 
-	pluginutil.WriteJSON(w, http.StatusOK, challengeStatsResponse{Challenges: result})
+	return challengeStatsResponse{Challenges: result}, nil
 }

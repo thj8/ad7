@@ -11,6 +11,9 @@ type TopThreeProvider interface {
 	// GetCompTopThree 获取比赛每道题目的三血信息
 	// 返回值: map[challengeID]BloodRankEntry
 	GetCompTopThree(ctx context.Context, compID string) (map[string]BloodRankEntry, error)
+
+	// IsTopThreeFull 检查某道题目的 top3 是否已填满（3项）
+	IsTopThreeFull(ctx context.Context, compID, chalID string) bool
 }
 
 // BloodRankEntry 表示单道题目的三血排名信息

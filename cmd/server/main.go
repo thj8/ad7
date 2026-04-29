@@ -16,6 +16,7 @@ import (
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
+	"ad7/internal/pluginutil"
 	"ad7/internal/router"
 	"ad7/internal/service"
 	"ad7/internal/store"
@@ -71,26 +72,6 @@ func main() {
 	submissionSvc := service.NewSubmissionService(st, st, st, teamResolver)
 	compSvc := service.NewCompetitionService(st)
 
-	// 初始化 Handler 层，注入对应的 Service
-	challengeH := handler.NewChallengeHandler(challengeSvc)
-	submissionH := handler.NewSubmissionHandler(submissionSvc)
-	compH := handler.NewCompetitionHandler(compSvc, teamResolver)
-
-	// 创建 chi 路由器并挂载全局中间件
-	r := chi.NewRouter()
-	r.Use(chimw.Logger)    // 请求日志记录
-	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
-	r.Use(middleware.MaxBodySize(1 << 20)) // 1MB body 限制
-
-	// 注册 API v1 路由组（通过 router 包统一注册，需要 JWT）
-	router.RegisterAPIV1(r, router.RouteDeps{
-		Auth:         authMW,
-		Config:       cfg,
-		ChallengeH:   challengeH,
-		CompetitionH: compH,
-		SubmissionH:  submissionH,
-	})
-
 	// 初始化所有插件（注意顺序：缓存插件最先加载）
 	plugins := []plugin.Plugin{
 		cache.New(),         // 缓存插件（最先加载，供其他插件使用）
@@ -106,6 +87,32 @@ func main() {
 	for _, p := range plugins {
 		pluginMap[p.Name()] = p
 	}
+
+	// 获取缓存提供器（供 handler 使用）
+	var cacheProvider pluginutil.CacheProvider
+	if cp, ok := pluginMap[plugin.NameCache].(cache.Provider); ok {
+		cacheProvider = cp
+	}
+
+	// 初始化 Handler 层
+	challengeH := handler.NewChallengeHandler(challengeSvc)
+	submissionH := handler.NewSubmissionHandler(submissionSvc)
+	compH := handler.NewCompetitionHandler(compSvc, teamResolver, cacheProvider)
+
+	// 创建 chi 路由器并挂载全局中间件
+	r := chi.NewRouter()
+	r.Use(chimw.Logger)    // 请求日志记录
+	r.Use(chimw.Recoverer) // panic 恢复，防止服务崩溃
+	r.Use(middleware.MaxBodySize(1 << 20)) // 1MB body 限制
+
+	// 注册 API v1 路由组（通过 router 包统一注册，需要 JWT）
+	router.RegisterAPIV1(r, router.RouteDeps{
+		Auth:         authMW,
+		Config:       cfg,
+		ChallengeH:  challengeH,
+		CompetitionH: compH,
+		SubmissionH:  submissionH,
+	})
 
 	// 注册所有插件路由，传递依赖映射
 	for _, p := range plugins {

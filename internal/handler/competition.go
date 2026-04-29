@@ -11,6 +11,7 @@ import (
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
+	"ad7/internal/pluginutil"
 	"ad7/internal/service"
 )
 
@@ -19,12 +20,13 @@ import (
 type CompetitionHandler struct {
 	svc          *service.CompetitionService
 	teamResolver *service.TeamResolver
+	cache        pluginutil.CacheProvider
 }
 
 // NewCompetitionHandler 创建 CompetitionHandler 实例。
-// 参数 svc: 比赛业务逻辑服务；tr: 队伍解析器。
-func NewCompetitionHandler(svc *service.CompetitionService, tr *service.TeamResolver) *CompetitionHandler {
-	return &CompetitionHandler{svc: svc, teamResolver: tr}
+// 参数 svc: 比赛业务逻辑服务；tr: 队伍解析器；cache: 缓存提供器（可选）。
+func NewCompetitionHandler(svc *service.CompetitionService, tr *service.TeamResolver, cache pluginutil.CacheProvider) *CompetitionHandler {
+	return &CompetitionHandler{svc: svc, teamResolver: tr, cache: cache}
 }
 
 // List 处理 GET /api/v1/competitions 请求。
@@ -46,7 +48,10 @@ func (h *CompetitionHandler) List(w http.ResponseWriter, r *http.Request) {
 // 根据 res_id 获取单个比赛的详情。
 func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := ctxutil.ID(r)
-	c, err := h.svc.Get(r.Context(), id)
+
+	cached, err := pluginutil.WithCache(h.cache, "comp:"+id, func() (any, error) {
+		return h.svc.Get(r.Context(), id)
+	})
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -55,7 +60,7 @@ func (h *CompetitionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, cached)
 }
 
 // ListChallenges 处理 GET /api/v1/competitions/{id}/challenges 请求。

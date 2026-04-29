@@ -5,6 +5,7 @@
 package leaderboard
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
+	"ad7/plugins/cache"
 	"ad7/plugins/topthree"
 )
 
@@ -22,6 +24,7 @@ import (
 type Plugin struct {
 	db        *sql.DB
 	topThree  topthree.TopThreeProvider
+	cache     cache.Provider
 }
 
 // New 创建排行榜插件实例。
@@ -41,6 +44,13 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 	if topThreePlugin, ok := deps[plugin.NameTopThree]; ok {
 		if provider, ok := topThreePlugin.(topthree.TopThreeProvider); ok {
 			p.topThree = provider
+		}
+	}
+
+	// 从依赖中获取 cache 插件的 Provider 接口
+	if cachePlugin, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cachePlugin.(cache.Provider); ok {
+			p.cache = provider
 		}
 	}
 
@@ -73,23 +83,34 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		pluginutil.WriteError(w, http.StatusBadRequest, "invalid competition id")
 		return
 	}
-	ctx := r.Context()
 
+	cached, err := pluginutil.WithCache(p.cache, "leaderboard:"+compID, func() (any, error) {
+		return p.getLeaderboardFromDB(r.Context(), compID)
+	})
+
+	if err != nil {
+		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+
+	pluginutil.WriteJSON(w, http.StatusOK, map[string]any{"leaderboard": cached.([]entry)})
+}
+
+// getLeaderboardFromDB 从数据库获取比赛排行榜数据
+func (p *Plugin) getLeaderboardFromDB(ctx context.Context, compID string) ([]entry, error) {
 	// 0. 获取比赛模式
 	var mode string
 	err := p.db.QueryRowContext(ctx, `
 		SELECT mode FROM competitions WHERE res_id = ? AND is_deleted = 0
 	`, compID).Scan(&mode)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return nil, err
 	}
 
 	// 1. 获取比赛所有题目 ID（通过共享查询函数获取完整信息，再提取 ID）
 	challenges, err := pluginutil.GetCompChallenges(ctx, p.db, compID)
 	if err != nil {
-		pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-		return
+		return nil, err
 	}
 	chalIDs := make([]string, 0, len(challenges))
 	for _, c := range challenges {
@@ -106,8 +127,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		// 队伍模式
 		solves, err := pluginutil.GetTeamCorrectSubmissions(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return nil, err
 		}
 		teamSolves := make(map[string]map[string]time.Time)
 		for _, fs := range solves {
@@ -122,8 +142,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		// 计算队伍总分
 		totalScores, err = pluginutil.GetTeamScores(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return nil, err
 		}
 
 		// 3. 通过 TopThreeProvider 接口获取一二三血排名（队伍模式）
@@ -134,8 +153,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		// 个人模式（默认）
 		solves, err := pluginutil.GetCorrectSubmissions(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return nil, err
 		}
 		userSolves := make(map[string]map[string]time.Time)
 		for _, fs := range solves {
@@ -150,8 +168,7 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 		// 计算用户总分
 		totalScores, err = pluginutil.GetUserScores(ctx, p.db, compID)
 		if err != nil {
-			pluginutil.WriteError(w, http.StatusInternalServerError, "internal")
-			return
+			return nil, err
 		}
 
 		// 3. 通过 TopThreeProvider 接口获取一二三血排名（个人模式）
@@ -223,5 +240,6 @@ func (p *Plugin) listByComp(w http.ResponseWriter, r *http.Request) {
 	if board == nil {
 		board = []entry{}
 	}
-	pluginutil.WriteJSON(w, http.StatusOK, map[string]any{"leaderboard": board})
+
+	return board, nil
 }

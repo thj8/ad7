@@ -128,7 +128,7 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	compSvc := service.NewCompetitionService(st)
 	challengeH := handler.NewChallengeHandler(challengeSvc)
 	submissionH := handler.NewSubmissionHandler(submissionSvc)
-	compH := handler.NewCompetitionHandler(compSvc, teamResolver)
+	compH := handler.NewCompetitionHandler(compSvc, teamResolver, nil)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Recoverer)

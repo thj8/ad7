@@ -14,12 +14,15 @@ import (
 	"ad7/internal/event"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
+	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
+	"ad7/plugins/cache"
 )
 
 // Plugin 是三血追踪插件，持有数据库连接。
 type Plugin struct {
-	db *sql.DB
+	db    *sql.DB
+	cache cache.Provider
 }
 
 // New 创建三血插件实例。
@@ -37,6 +40,13 @@ func (p *Plugin) Name() string {
 // 同时订阅 EventCorrectSubmission 事件，用于实时更新三血排名。
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+
+	// 从依赖中获取 cache 插件的 Provider 接口
+	if cachePlugin, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cachePlugin.(cache.Provider); ok {
+			p.cache = provider
+		}
+	}
 
 	// 订阅正确提交事件，触发三血排名更新
 	event.Subscribe(event.EventCorrectSubmission, p.handleCorrectSubmission)
@@ -252,6 +262,14 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("[topthree] 提交事务失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
+		return
+	}
+
+	// 清除相关缓存
+	if p.cache != nil {
+		p.cache.Delete("topthree:" + compID)
+		p.cache.Delete("topthree:" + compID + ":" + chalID)
+		p.cache.Delete("topthree:" + compID + ":map")
 	}
 }
 
@@ -276,6 +294,17 @@ func (p *Plugin) GetBloodRank(ctx context.Context, compID, chalID, userID string
 // GetCompTopThree 获取比赛每道题目的三血信息
 // 返回值: map[challengeID]BloodRankEntry
 func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
+	cached, err := pluginutil.WithCache(p.cache, "topthree:"+compID+":map", func() (any, error) {
+		return p.getCompTopThreeFromDB(ctx, compID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cached.(map[string]BloodRankEntry), nil
+}
+
+// getCompTopThreeFromDB 从数据库获取比赛每道题目的三血信息
+func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT challenge_id, user_id, ranking
 		FROM topthree_records
@@ -306,5 +335,20 @@ func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string
 		}
 		result[chalID] = entry
 	}
+
 	return result, rows.Err()
+}
+
+// IsTopThreeFull 检查某道题目的 top3 是否已填满（3项）
+func (p *Plugin) IsTopThreeFull(ctx context.Context, compID, chalID string) bool {
+	var count int
+	err := p.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0
+	`, compID, chalID).Scan(&count)
+	if err != nil {
+		// 查询出错时保守处理，认为需要清除缓存
+		return false
+	}
+	return count >= 3
 }

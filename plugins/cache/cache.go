@@ -2,6 +2,7 @@
 package cache
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -13,12 +14,18 @@ import (
 	"ad7/internal/plugin"
 )
 
+// topThreeProvider 是本地接口，只定义我们需要的方法
+type topThreeProvider interface {
+	IsTopThreeFull(ctx context.Context, compID, chalID string) bool
+}
+
 // Plugin 是缓存插件，提供通用缓存能力并处理缓存失效。
 type Plugin struct {
 	db        *sql.DB
 	cache     *cache.Cache[any]
 	provider  Provider
 	authCache *cache.Cache[middleware.CachedToken]
+	topThree  topThreeProvider
 }
 
 // New 创建缓存插件实例。
@@ -92,6 +99,13 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 
 	p.provider = newCacheProvider(p.cache)
 
+	// 从依赖中获取 topthree 插件
+	if topThreePlugin, ok := deps[plugin.NameTopThree]; ok {
+		if provider, ok := topThreePlugin.(topThreeProvider); ok {
+			p.topThree = provider
+		}
+	}
+
 	// 订阅正确提交事件，用于清除相关缓存
 	event.Subscribe(event.EventCorrectSubmission, p.handleCorrectSubmission)
 
@@ -124,9 +138,26 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	// 清除比赛的排行榜缓存
 	p.Delete("leaderboard:" + compID)
 
-	// 清除题目的 top3 缓存
-	p.Delete("topthree:" + compID + ":" + chalID)
-	p.Delete("topthree:" + compID)
+	// 清除分析缓存
+	p.Delete("analytics:overview:" + compID)
+	p.Delete("analytics:categories:" + compID)
+	p.Delete("analytics:users:" + compID)
+	p.Delete("analytics:challenges:" + compID)
+
+	// 检查该题目的 top3 是否已填满（3项），如果未满才清除缓存
+	ctx := context.Background()
+	if p.topThree != nil {
+		if !p.topThree.IsTopThreeFull(ctx, compID, chalID) {
+			p.Delete("topthree:" + compID)
+			p.Delete("topthree:" + compID + ":" + chalID)
+			p.Delete("topthree:" + compID + ":map")
+		}
+	} else {
+		// 如果没有 topthree 插件，保守清除缓存
+		p.Delete("topthree:" + compID)
+		p.Delete("topthree:" + compID + ":" + chalID)
+		p.Delete("topthree:" + compID + ":map")
+	}
 }
 
 // Stop 停止缓存后台清理。
