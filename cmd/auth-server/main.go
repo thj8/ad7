@@ -13,17 +13,16 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"ad7/internal/auth"
-	"ad7/internal/config"
+	"ad7/internal/db"
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
-	"ad7/internal/store"
 )
 
 func main() {
 	cfgPath := flag.String("config", "cmd/auth-server/config.yaml", "config file path")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := auth.LoadAuthConfig(*cfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
@@ -32,16 +31,16 @@ func main() {
 		log.Fatalf("init logger: %v", err)
 	}
 
-	st, err := store.New(cfg.DB.DSN())
+	dbConn, err := db.Connect(cfg.DB.DSN())
 	if err != nil {
 		log.Fatalf("connect db: %v", err)
 	}
-	defer st.Close()
+	defer dbConn.Close()
 
 	// auth 服务自己使用 JWT secret 做本地验证（用于保护自己的路由）
 	authMW := middleware.NewAuth("http://localhost:"+fmt.Sprintf("%d", cfg.Server.Port), cfg.JWT.AdminRole)
 
-	authStore := auth.NewAuthStore(st.DB())
+	authStore := auth.NewAuthStore(dbConn)
 	authSvc := auth.NewAuthService(authStore, cfg.JWT.Secret, cfg.JWT.AdminRole)
 	teamSvc := auth.NewTeamService(authStore, authStore, authStore)
 	authH := auth.NewAuthHandler(authSvc)

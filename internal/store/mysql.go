@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	"ad7/internal/db"
 	"ad7/internal/model"
 	"ad7/internal/uuid"
-	_ "github.com/go-sql-driver/mysql"
 )
 
 // Store 是所有 Store 接口的统一实现，持有 MySQL 数据库连接。
@@ -21,15 +21,11 @@ type Store struct {
 // 参数 dsn 为 MySQL 数据源名称，格式：user:password@tcp(host:port)/dbname?parseTime=true
 // 返回初始化后的 Store 实例，连接时会执行 Ping 验证数据库可用性。
 func New(dsn string) (*Store, error) {
-	db, err := sql.Open("mysql", dsn)
+	conn, err := db.Connect(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, err
 	}
-	// 验证数据库连接是否可用
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("db ping: %w", err)
-	}
-	return &Store{db: db}, nil
+	return &Store{db: conn}, nil
 }
 
 // Close 关闭数据库连接。

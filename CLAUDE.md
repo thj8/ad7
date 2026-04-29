@@ -120,3 +120,13 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_m
 - **队伍比赛模式**: 比赛创建时可选择个人模式或队伍模式。队伍模式下，排行榜、topthree、analytics 都按队伍统计而非个人。队伍提交会去重，同一题目同一队伍只有首次正确提交计分
 - **访问控制**: 队伍模式下，CheckCompAccess 验证用户是否属于有权限参加比赛的队伍（自由加入模式：用户有队伍即可；管理模式：队伍需在 competition_teams 表中）
 - **向后兼容**: 所有现有代码默认使用个人模式，mode 字段默认值为 "individual"，确保不影响现有功能
+- **包纯净性（严格执行）**: 两个服务（CTF / Auth）共享的包必须只包含双方都需要的代码，不允许混入单方专属逻辑
+  - `internal/basemodel/` — 共享基础类型（`BaseModel`、`Time`、`ValidationError`、验证工具函数），双方都可引用
+  - `internal/db/` — 共享数据库连接管理（`Connect`），双方都可引用
+  - `internal/config/` — 共享配置类型（`ServerConfig`、`DBConfig`、`JWTConfig`、`LogConfig`、`RateLimitRule`）+ CTF 专用 `Load` 函数
+  - `internal/middleware/` — 共享中间件（`Authenticate`、`RequireAdmin`、`LimitByIP`、`LimitByUserID`、`MaxBodySize`），不允许包含 CTF 专属逻辑
+  - `internal/auth/` — Auth 服务专属，包含自己的 `AuthServerConfig`/`LoadAuthConfig`，引用 `basemodel` 而非 `model`
+  - `internal/ctxutil/` — CTF 专属（URL 参数验证、Context 存取），Auth 服务禁止引用
+  - `internal/model/` — CTF 专属领域模型（`Challenge`、`Submission` 等），通过 type alias 重导出 `basemodel` 类型保持向后兼容，Auth 服务禁止引用
+  - `internal/store/` — CTF 专属（store 接口和 MySQL 实现），Auth 服务禁止引用（用 `internal/db/` 获取连接）
+  - **新增代码时**: 如果一个函数/类型只被一个服务使用，必须放到该服务专属的包中，不能放入共享包

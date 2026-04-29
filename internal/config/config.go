@@ -56,7 +56,6 @@ type RateLimitRule struct {
 // RateLimitConfig 包含各端点的限流配置。
 type RateLimitConfig struct {
 	Submission RateLimitRule `yaml:"submission"` // Flag 提交限流规则
-	Auth       RateLimitRule `yaml:"auth"`      // 认证端点限流规则（注册/登录）
 }
 
 // LogConfig 定义日志输出配置。
@@ -102,13 +101,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.RateLimit.Submission.Window == 0 {
 		cfg.RateLimit.Submission.Window = 10 * time.Second
-	}
-	// 设置默认认证限流：1 分钟内最多 10 次请求
-	if cfg.RateLimit.Auth.Requests == 0 {
-		cfg.RateLimit.Auth.Requests = 10
-	}
-	if cfg.RateLimit.Auth.Window == 0 {
-		cfg.RateLimit.Auth.Window = 1 * time.Minute
 	}
 	// 设置默认日志级别
 	if cfg.Log.Level == "" {

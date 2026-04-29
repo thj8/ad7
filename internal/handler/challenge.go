@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 
+	"ad7/internal/ctxutil"
 	"ad7/internal/logger"
 	"ad7/internal/middleware"
 	"ad7/internal/model"
@@ -45,7 +46,7 @@ func (h *ChallengeHandler) List(w http.ResponseWriter, r *http.Request) {
 // 根据 URL 参数中的 res_id 获取单个题目详情（已通过中间件验证）。
 // 返回 404 如果题目不存在。
 func (h *ChallengeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := middleware.ID(r)
+	id := ctxutil.ID(r)
 	c, err := h.svc.Get(r.Context(), id)
 	if err == service.ErrNotFound {
 		writeError(w, http.StatusNotFound, "not found")
@@ -115,7 +116,7 @@ type updateRequest struct {
 // 使用合并策略更新题目：只修改请求中非空/非零的字段。
 // is_enabled 总是被显式设置。
 func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := middleware.ID(r)
+	id := ctxutil.ID(r)
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -149,7 +150,7 @@ func (h *ChallengeHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete 处理 DELETE /api/v1/admin/challenges/{id} 请求（管理员）。
 // 软删除指定题目。
 func (h *ChallengeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := middleware.ID(r)
+	id := ctxutil.ID(r)
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

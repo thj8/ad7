@@ -3,6 +3,8 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+
+	"ad7/internal/logger"
 )
 
 // AuthHandler 处理用户注册和登录的 HTTP 请求。
@@ -33,10 +35,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == ErrConflict {
 		// 不泄露用户名是否已存在，返回与验证失败相同的错误
+		logger.Warn("register failed", "username", body.Username, "error", "conflict")
 		authWriteError(w, http.StatusBadRequest, "registration failed")
 		return
 	}
 	if err != nil {
+		logger.Error("register failed", "username", body.Username, "error", err)
 		authWriteError(w, http.StatusBadRequest, "registration failed")
 		return
 	}
@@ -66,6 +70,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		logger.Error("login failed", "username", body.Username, "error", err)
 		authWriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"ad7/internal/auth"
+	"ad7/internal/ctxutil"
 	"ad7/internal/handler"
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
@@ -134,45 +135,45 @@ func NewTestEnv(m *testing.M) *TestEnv {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(auth.Authenticate)
 		r.Get("/challenges", challengeH.List)
-		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+		r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 			Get("/challenges/{id}", challengeH.Get)
 		r.Get("/competitions", compH.List)
-		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+		r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 			Get("/competitions/{id}", compH.Get)
-		r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+		r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 			Get("/competitions/{id}/challenges", compH.ListChallenges)
 		r.With(
 			middleware.LimitByUserID(
 				cfg.RateLimit.Submission.Requests,
 				cfg.RateLimit.Submission.Window,
 			),
-			middleware.ValidateURLParam("comp_id", middleware.CtxKeyCompID),
-			middleware.ValidateURLParam("id", middleware.CtxKeyChalID),
+			ctxutil.ValidateURLParam("comp_id", ctxutil.CtxKeyCompID),
+			ctxutil.ValidateURLParam("id", ctxutil.CtxKeyChalID),
 		).Post("/competitions/{comp_id}/challenges/{id}/submit", submissionH.SubmitInComp)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Post("/challenges", challengeH.Create)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Put("/challenges/{id}", challengeH.Update)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Delete("/challenges/{id}", challengeH.Delete)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Get("/competitions/{id}/submissions", submissionH.ListByComp)
 			r.Post("/competitions", compH.Create)
 			r.Get("/competitions", compH.ListAll)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Put("/competitions/{id}", compH.Update)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Delete("/competitions/{id}", compH.Delete)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Post("/competitions/{id}/challenges", compH.AddChallenge)
 			r.With(
-				middleware.ValidateURLParam("id", middleware.CtxKeyID),
-				middleware.ValidateURLParam("challenge_id", middleware.CtxKeyChalID),
+				ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID),
+				ctxutil.ValidateURLParam("challenge_id", ctxutil.CtxKeyChalID),
 			).Delete("/competitions/{id}/challenges/{challenge_id}", compH.RemoveChallenge)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Post("/competitions/{id}/start", compH.Start)
-			r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+			r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 				Post("/competitions/{id}/end", compH.End)
 		})
 	})

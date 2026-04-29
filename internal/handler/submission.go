@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"ad7/internal/ctxutil"
 	"ad7/internal/middleware"
 	"ad7/internal/service"
 	"ad7/internal/store"
@@ -27,8 +28,8 @@ func NewSubmissionHandler(svc *service.SubmissionService) *SubmissionHandler {
 // 比赛范围内的 Flag 提交。从 Context 获取已验证的比赛 ID 和题目 ID。
 // 返回提交结果：correct / incorrect / already_solved。
 func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request) {
-	compID := middleware.CompID(r)
-	chalID := middleware.ChalID(r)
+	compID := ctxutil.CompID(r)
+	chalID := ctxutil.ChalID(r)
 
 	var body struct {
 		Flag string `json:"flag"`
@@ -66,7 +67,7 @@ func (h *SubmissionHandler) SubmitInComp(w http.ResponseWriter, r *http.Request)
 // 支持通过 query 参数 user_id 和 challenge_id 过滤提交记录。
 // 无效的 ID 参数会被忽略（当作没传），不会返回 400 错误。
 func (h *SubmissionHandler) ListByComp(w http.ResponseWriter, r *http.Request) {
-	compID := middleware.ID(r)
+	compID := ctxutil.ID(r)
 	userID := uuid.ValidateIfPresent(r.URL.Query().Get("user_id"))
 	challengeID := uuid.ValidateIfPresent(r.URL.Query().Get("challenge_id"))
 	subs, err := h.svc.ListByComp(r.Context(), store.ListSubmissionsParams{

@@ -3,14 +3,14 @@ package router
 import (
 	"github.com/go-chi/chi/v5"
 
-	"ad7/internal/middleware"
+	"ad7/internal/ctxutil"
 )
 
 // RegisterChallengeRoutes 注册题目公开路由。
 // 公开路由：GET /challenges, GET /challenges/{id}
 func RegisterChallengeRoutes(r chi.Router, deps RouteDeps) {
 	r.Get("/challenges", deps.ChallengeH.List)
-	r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+	r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 		Get("/challenges/{id}", deps.ChallengeH.Get)
 }
 
@@ -18,8 +18,8 @@ func RegisterChallengeRoutes(r chi.Router, deps RouteDeps) {
 // Admin 路由：POST/PUT/DELETE /challenges/...
 func registerAdminChallengeRoutes(r chi.Router, deps RouteDeps) {
 	r.Post("/challenges", deps.ChallengeH.Create)
-	r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+	r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 		Put("/challenges/{id}", deps.ChallengeH.Update)
-	r.With(middleware.ValidateURLParam("id", middleware.CtxKeyID)).
+	r.With(ctxutil.ValidateURLParam("id", ctxutil.CtxKeyID)).
 		Delete("/challenges/{id}", deps.ChallengeH.Delete)
 }

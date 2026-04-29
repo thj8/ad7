@@ -1,5 +1,5 @@
-// Package middleware 提供 HTTP 中间件。
-package middleware
+// Package ctxutil 提供 CTF 服务专用的 URL 参数验证和 Context 存取工具。
+package ctxutil
 
 import (
 	"context"
@@ -25,7 +25,7 @@ const (
 // ValidateURLParam 验证 URL 参数并将其存入 Context。
 // 参数名必须与 chi.URLParam 使用的名称一致。
 // 验证通过后，可通过对应的 Getter 函数（如 CompID）从 Context 中获取。
-func ValidateURLParam(paramName string, ctxKey ctxKey) func(http.Handler) http.Handler {
+func ValidateURLParam(paramName string, key ctxKey) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id := chi.URLParam(r, paramName)
@@ -33,7 +33,7 @@ func ValidateURLParam(paramName string, ctxKey ctxKey) func(http.Handler) http.H
 				writeError(w, http.StatusBadRequest, "invalid "+paramName)
 				return
 			}
-			ctx := context.WithValue(r.Context(), ctxKey, id)
+			ctx := context.WithValue(r.Context(), key, id)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -77,7 +77,7 @@ func ID(r *http.Request) string {
 	panic("ID called without ValidateURLParam middleware for id")
 }
 
-// writeError 是 handler 包 writeError 的简化版，避免循环导入。
+// writeError 写入 JSON 错误响应。
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
