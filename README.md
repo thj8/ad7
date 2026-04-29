@@ -43,24 +43,19 @@ mysql -u root -p your_db < sql/migrations/002_team_competition_mode.sql
 # 生成测试数据（可选）
 go run ./cmd/seed/
 
+# 运行测试
+go test ./...
+
+# 仅运行集成测试（需要 MySQL）
+source .env
+go test ./internal/integration/... -v -count=1
+
 # 运行服务器（必须按顺序启动）
 # 1. 先启动认证服务器（端口 8081）
 go run ./cmd/auth-server -config cmd/auth-server/config.yaml
 
 # 2. 再启动 CTF 服务器（端口 8080）
 go run ./cmd/server -config config.yaml
-
-# 尝试测试脚本
-./scripts/test-competitions.sh   # 比赛CRUD + 开始/结束
-./scripts/test-challenges.sh     # 题目CRUD
-./scripts/test-submissions.sh    # Flag提交
-./scripts/test-leaderboard.sh    # 排行榜
-./scripts/test-notifications.sh  # 通知
-./scripts/test-hints.sh          # 提示
-./scripts/test-analytics.sh      # 分析
-
-# 或一键跑全部
-./scripts/demo.sh
 ```
 
 ## 架构说明
@@ -192,15 +187,6 @@ CTF 服务器 (端口 8080)
 │   ├── server/           # CTF 服务器入口点（端口 8080）
 │   ├── auth-server/      # 认证服务器入口点（端口 8081）
 │   └── seed/             # 测试数据生成器
-├── scripts/
-│   ├── demo.sh           # 一键运行所有测试脚本
-│   ├── test-competitions.sh  # 比赛CRUD + 开始/结束
-│   ├── test-challenges.sh    # 题目CRUD
-│   ├── test-submissions.sh   # Flag提交 + 记录
-│   ├── test-leaderboard.sh   # 排行榜
-│   ├── test-notifications.sh # 通知
-│   ├── test-hints.sh         # 提示CRUD
-│   └── test-analytics.sh     # 分析
 ├── internal/
 │   ├── auth/             # 认证模块（用户、队伍、JWT）
 │   ├── config/           # YAML 配置加载

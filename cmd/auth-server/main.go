@@ -51,7 +51,6 @@ func main() {
 		Auth:       authMW,
 		AuthH:      authH,
 		TeamH:      teamH,
-		MaxBody:    1 << 20, // 1MB
 		AuthLimit:  cfg.RateLimit.Auth.Requests,
 		AuthWindow: cfg.RateLimit.Auth.Window,
 	}
@@ -59,6 +58,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
+	r.Use(middleware.MaxBodySize(1 << 20)) // 1MB body 限制
 
 	// 公共路由（register, login, verify — 不需要 JWT）
 	r.Route("/api/v1", func(r chi.Router) {

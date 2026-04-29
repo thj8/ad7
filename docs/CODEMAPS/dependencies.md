@@ -37,5 +37,4 @@ TopThree → EventBus (subscribes to EventCorrectSubmission)
 go build ./...              (build all)
 go test ./... -short        (unit tests only)
 go test ./internal/integration/...  (integration tests, needs MySQL)
-./scripts/demo.sh           (full demo test suite)
 ```

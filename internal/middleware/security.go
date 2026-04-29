@@ -3,9 +3,6 @@ package middleware
 
 import (
 	"net/http"
-	"time"
-
-	"github.com/go-chi/httprate"
 )
 
 // MaxBodySize 限制请求体大小。
@@ -19,15 +16,3 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// LimitAuthEndpoints 创建认证端点的限流中间件。
-// 对登录和注册端点使用更严格的限制。
-func LimitAuthEndpoints(requests int, window time.Duration) func(http.Handler) http.Handler {
-	return httprate.Limit(
-		requests,
-		window,
-		httprate.WithKeyFuncs(httprate.KeyByIP),
-		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)
-		}),
-	)
-}

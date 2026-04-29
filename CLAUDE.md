@@ -25,22 +25,6 @@ go run ./cmd/auth-server -config cmd/auth-server/config.yaml
 go run ./cmd/seed/
 TEST_DSN="root:pass@tcp(host:3306)/ctf?parseTime=true" go run ./cmd/seed/
 
-# 测试脚本（每个资源领域独立测试）
-./scripts/test-competitions.sh   # 比赛CRUD + 开始/结束
-./scripts/test-challenges.sh     # 题目CRUD
-./scripts/test-submissions.sh    # Flag提交 + 记录
-./scripts/test-leaderboard.sh    # 排行榜
-./scripts/test-notifications.sh  # 通知
-./scripts/test-hints.sh          # 提示CRUD
-./scripts/test-analytics.sh      # 分析
-
-# 一键跑全部测试脚本
-./scripts/demo.sh
-./scripts/demo.sh competitions submissions  # 只跑指定模块
-
-# 环境变量
-BASE_URL=http://host:8080 JWT_SECRET=xxx ./scripts/test-leaderboard.sh
-
 # 运行所有测试
 go test ./...
 

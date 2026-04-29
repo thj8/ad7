@@ -13,19 +13,15 @@ type RouteDeps struct {
 	Auth       *middleware.Auth
 	AuthH      *AuthHandler
 	TeamH      *TeamHandler
-	MaxBody    int64         // 请求体大小限制（字节）
 	AuthLimit  int           // 认证端点限流请求数
 	AuthWindow time.Duration // 认证端点限流时间窗口
 }
 
-// RegisterPublicRoutes 注册不需要认证的公共路由（带限流和 body 限制）。
+// RegisterPublicRoutes 注册不需要认证的公共路由（带限流）。
 func RegisterPublicRoutes(r chi.Router, deps RouteDeps) {
 	r.Group(func(r chi.Router) {
-		if deps.MaxBody > 0 {
-			r.Use(middleware.MaxBodySize(deps.MaxBody))
-		}
 		if deps.AuthLimit > 0 && deps.AuthWindow > 0 {
-			r.Use(middleware.LimitAuthEndpoints(deps.AuthLimit, deps.AuthWindow))
+			r.Use(middleware.LimitByIP(deps.AuthLimit, deps.AuthWindow))
 		}
 		r.Post("/register", deps.AuthH.Register)
 		r.Post("/login", deps.AuthH.Login)

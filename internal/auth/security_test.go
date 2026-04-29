@@ -31,7 +31,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *mockUserStore) {
 
 	// Rate limited routes (5 requests per second for testing)
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.LimitAuthEndpoints(5, time.Second))
+		r.Use(middleware.LimitByIP(5, time.Second))
 		r.Post("/register", handler.Register)
 		r.Post("/login", handler.Login)
 	})

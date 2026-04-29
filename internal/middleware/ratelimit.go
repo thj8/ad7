@@ -21,6 +21,9 @@ func LimitByIP(requests int, window time.Duration) func(http.Handler) http.Handl
 		requests,
 		window,
 		httprate.WithKeyFuncs(httprate.KeyByIP),
+		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)
+		}),
 	)
 }
 
