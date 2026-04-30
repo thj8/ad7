@@ -354,23 +354,7 @@ func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID strin
 		if err := rows.Scan(&userID, &teamID, &ranking); err != nil {
 			continue
 		}
-		switch ranking {
-		case 1:
-			entry.FirstBlood = userID
-			if teamID.Valid {
-				entry.FirstBloodTeam = teamID.String
-			}
-		case 2:
-			entry.SecondBlood = userID
-			if teamID.Valid {
-				entry.SecondBloodTeam = teamID.String
-			}
-		case 3:
-			entry.ThirdBlood = userID
-			if teamID.Valid {
-				entry.ThirdBloodTeam = teamID.String
-			}
-		}
+		updateBloodRankEntry(&entry, userID, teamID, ranking)
 	}
 
 	return entry
@@ -380,7 +364,6 @@ func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID strin
 type cacheManager interface {
 	DeleteByPrefix(prefix string)
 }
-
 
 // GetCompTopThree 获取比赛每道题目的三血信息
 // 返回值: map[challengeID]BloodRankEntry
@@ -417,26 +400,31 @@ func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[
 		}
 		entry := result[chalID]
 		entry.ChallengeID = chalID
-		switch ranking {
-		case 1:
-			entry.FirstBlood = userID
-			if teamID.Valid {
-				entry.FirstBloodTeam = teamID.String
-			}
-		case 2:
-			entry.SecondBlood = userID
-			if teamID.Valid {
-				entry.SecondBloodTeam = teamID.String
-			}
-		case 3:
-			entry.ThirdBlood = userID
-			if teamID.Valid {
-				entry.ThirdBloodTeam = teamID.String
-			}
-		}
+		updateBloodRankEntry(&entry, userID, teamID, ranking)
 		result[chalID] = entry
 	}
 
 	return result, rows.Err()
+}
+
+// updateBloodRankEntry 根据排名更新 BloodRankEntry
+func updateBloodRankEntry(entry *BloodRankEntry, userID string, teamID sql.NullString, ranking int) {
+	switch ranking {
+	case 1:
+		entry.FirstBlood = userID
+		if teamID.Valid {
+			entry.FirstBloodTeam = teamID.String
+		}
+	case 2:
+		entry.SecondBlood = userID
+		if teamID.Valid {
+			entry.SecondBloodTeam = teamID.String
+		}
+	case 3:
+		entry.ThirdBlood = userID
+		if teamID.Valid {
+			entry.ThirdBloodTeam = teamID.String
+		}
+	}
 }
 
