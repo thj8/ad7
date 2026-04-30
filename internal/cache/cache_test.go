@@ -159,8 +159,7 @@ func TestGetOrSet(t *testing.T) {
 
 	// 第一次调用：应该执行 fn
 	v, err := c.GetOrSet("key1", fn)
-	if err != nil {
-		t.Errorf("GetOrSet() error = %v", err)
+	if err != nil {t.Errorf("GetOrSet() error = %v", err)
 	}
 	if v != "computed" {
 		t.Errorf("GetOrSet() = %q, want %q", v, "computed")
@@ -179,5 +178,44 @@ func TestGetOrSet(t *testing.T) {
 	}
 	if called != 1 {
 		t.Errorf("called = %d, want 1 (should not call fn again)", called)
+	}
+}
+
+func TestDeleteByPrefix(t *testing.T) {
+	c := New[string](Options{})
+
+	c.Set("prefix:key1", "value1")
+	c.Set("prefix:key2", "value2")
+	c.Set("other:key3", "value3")
+
+	if c.Len() != 3 {
+		t.Errorf("Len() = %d, want 3", c.Len())
+	}
+
+	c.DeleteByPrefix("prefix:")
+
+	if c.Len() != 1 {
+		t.Errorf("Len() after DeleteByPrefix = %d, want 1", c.Len())
+	}
+
+	if _, ok := c.Get("prefix:key1"); ok {
+		t.Error("prefix:key1 should be deleted")
+	}
+	if _, ok := c.Get("prefix:key2"); ok {
+		t.Error("prefix:key2 should be deleted")
+	}
+	if v, ok := c.Get("other:key3"); !ok || v != "value3" {
+		t.Error("other:key3 should still exist")
+	}
+}
+
+func TestDeleteByPrefixEmpty(t *testing.T) {
+	c := New[string](Options{})
+
+	// 删除不存在的前缀应该不会报错
+	c.DeleteByPrefix("nonexistent:")
+
+	if c.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", c.Len())
 	}
 }

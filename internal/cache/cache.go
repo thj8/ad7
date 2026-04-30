@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -124,6 +125,17 @@ func (c *Cache[V]) GetOrSetWithTTL(key string, fn func() (V, error), ttl time.Du
 func (c *Cache[V]) Delete(key string) {
 	c.mu.Lock()
 	delete(c.items, key)
+	c.mu.Unlock()
+}
+
+// DeleteByPrefix 删除所有匹配前缀的缓存条目。
+func (c *Cache[V]) DeleteByPrefix(prefix string) {
+	c.mu.Lock()
+	for k := range c.items {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.items, k)
+		}
+	}
 	c.mu.Unlock()
 }
 
