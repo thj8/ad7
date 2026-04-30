@@ -305,8 +305,12 @@ func (p *Plugin) isTopThreeFullFromCache(compID, chalID string) bool {
 		return false
 	}
 
-	// 三个位置都有值才算满
-	return entry.FirstBlood != "" && entry.SecondBlood != "" && entry.ThirdBlood != ""
+	// 检查三个位置是否都有值（用户ID或队伍ID任一有值即可）
+	hasFirst := entry.FirstBlood != "" || entry.FirstBloodTeam != ""
+	hasSecond := entry.SecondBlood != "" || entry.SecondBloodTeam != ""
+	hasThird := entry.ThirdBlood != "" || entry.ThirdBloodTeam != ""
+
+	return hasFirst && hasSecond && hasThird
 }
 
 // refreshChalCache 刷新单道题目的三血缓存
