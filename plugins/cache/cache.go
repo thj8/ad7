@@ -17,19 +17,23 @@ import (
 
 // Plugin 是缓存插件，提供通用缓存能力并处理缓存失效。
 type Plugin struct {
-	db        *sql.DB
-	cache     *cache.Cache[any]
-	manager   pluginutil.CacheManager
-	authCache *cache.Cache[middleware.CachedToken]
-	enabled   bool
-	modules   map[string]bool
+	db             *sql.DB
+	cache          *cache.Cache[any]
+	manager        pluginutil.CacheManager
+	authCache      *cache.Cache[middleware.CachedToken]
+	enabled        bool
+	modules        map[string]bool
+	defaultTTL     time.Duration
+	cleanupInterval time.Duration
 }
 
 // New 创建缓存插件实例。
 func New(cfg config.CacheConfig) *Plugin {
 	return &Plugin{
-		enabled: cfg.Enabled,
-		modules: cfg.Modules,
+		enabled:         cfg.Enabled,
+		modules:         cfg.Modules,
+		defaultTTL:      cfg.DefaultTTL,
+		cleanupInterval: cfg.CleanupInterval,
 	}
 }
 
@@ -67,16 +71,16 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 	p.db = db
 
 	if p.enabled {
-		// 初始化通用缓存（5分钟 TTL，10分钟清理间隔）
+		// 初始化通用缓存
 		p.cache = cache.New[any](cache.Options{
-			DefaultTTL:      5 * time.Minute,
-			CleanupInterval: 10 * time.Minute,
+			DefaultTTL:      p.defaultTTL,
+			CleanupInterval: p.cleanupInterval,
 		})
 
-		// 初始化 token 缓存（5分钟 TTL）
+		// 初始化 token 缓存
 		p.authCache = cache.New[middleware.CachedToken](cache.Options{
-			DefaultTTL:      5 * time.Minute,
-			CleanupInterval: 10 * time.Minute,
+			DefaultTTL:      p.defaultTTL,
+			CleanupInterval: p.cleanupInterval,
 		})
 
 		p.manager = newCacheProvider(p.cache)
