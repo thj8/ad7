@@ -217,6 +217,11 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 
 	ctx := context.Background()
 
+	// 快速路径：先查缓存，如果该题目三血已满，直接跳过
+	if p.isTopThreeFullFromCache(compID, chalID) {
+		return
+	}
+
 	// 开启事务，将读取和写入放在同一事务中
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -236,6 +241,15 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 	current, err := getCurrentTopThreeForUpdate(ctx, tx, compID, chalID)
 	if err != nil {
 		log.Printf("[topthree] 查询三血记录失败: comp=%s chal=%s user=%s err=%v", compID, chalID, userID, err)
+		return
+	}
+
+	// 再次检查：如果数据库里已经满了，更新缓存后直接返回
+	if len(current) >= 3 {
+		// 提交事务（只读）
+		_ = tx.Commit()
+		// 刷新该题目的缓存
+		p.refreshChalCache(ctx, compID, chalID)
 		return
 	}
 
@@ -270,12 +284,82 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 		return
 	}
 
-	// 清除相关缓存
-	if p.cache != nil {
-		if cm, ok := p.cache.(cacheManager); ok {
-			cm.DeleteByPrefix("topthree:" + compID)
+	// 刷新该题目的缓存
+	p.refreshChalCache(ctx, compID, chalID)
+}
+
+// isTopThreeFullFromCache 从缓存检查某道题目的三血是否已满
+func (p *Plugin) isTopThreeFullFromCache(compID, chalID string) bool {
+	if p.cache == nil {
+		return false
+	}
+
+	// 从缓存获取该题目的三血
+	cached, ok := p.cache.Get("topthree:" + compID + ":" + chalID)
+	if !ok {
+		return false // 缓存没有，需要查数据库
+	}
+
+	entry, ok := cached.(BloodRankEntry)
+	if !ok {
+		return false
+	}
+
+	// 三个位置都有值才算满
+	return entry.FirstBlood != "" && entry.SecondBlood != "" && entry.ThirdBlood != ""
+}
+
+// refreshChalCache 刷新单道题目的三血缓存
+func (p *Plugin) refreshChalCache(ctx context.Context, compID, chalID string) {
+	if p.cache == nil {
+		return
+	}
+
+	// 查询该题目的三血
+	entry := p.getChalTopThreeFromDB(ctx, compID, chalID)
+
+	// 更新该题目的单独缓存
+	p.cache.Set("topthree:"+compID+":"+chalID, entry)
+
+	// 清除比赛级别的 map 缓存（因为它也包含了该题目）
+	if cm, ok := p.cache.(cacheManager); ok {
+		cm.DeleteByPrefix("topthree:" + compID + ":map")
+	}
+}
+
+// getChalTopThreeFromDB 从数据库获取单道题目的三血信息
+func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID string) BloodRankEntry {
+	var entry BloodRankEntry
+	entry.ChallengeID = chalID
+
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT user_id, ranking
+		FROM topthree_records
+		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0 AND ranking <= 3
+		ORDER BY ranking ASC
+	`, compID, chalID)
+	if err != nil {
+		return entry
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID string
+		var ranking int
+		if err := rows.Scan(&userID, &ranking); err != nil {
+			continue
+		}
+		switch ranking {
+		case 1:
+			entry.FirstBlood = userID
+		case 2:
+			entry.SecondBlood = userID
+		case 3:
+			entry.ThirdBlood = userID
 		}
 	}
+
+	return entry
 }
 
 // cacheManager 是本地接口，用于更高级的缓存管理
