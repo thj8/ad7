@@ -11,8 +11,11 @@ type TopThreeProvider interface {
 
 // BloodRankEntry 表示单道题目的三血排名信息
 type BloodRankEntry struct {
-	ChallengeID string
-	FirstBlood  string // 用户ID
-	SecondBlood string // 用户ID
-	ThirdBlood  string // 用户ID
+	ChallengeID   string
+	FirstBlood    string // 用户ID
+	FirstBloodTeam string // 队伍ID（如果是队伍模式）
+	SecondBlood   string // 用户ID
+	SecondBloodTeam string // 队伍ID（如果是队伍模式）
+	ThirdBlood    string // 用户ID
+	ThirdBloodTeam string // 队伍ID（如果是队伍模式）
 }

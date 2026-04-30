@@ -152,8 +152,29 @@ func (p *Plugin) getLeaderboardFromDB(ctx context.Context, compID string) ([]ent
 
 		// 3. 通过 TopThreeProvider 接口获取一二三血排名（队伍模式）
 		bloodRank = make(map[string]int)
-		// 暂时在队伍模式下不处理 bloodRank，因为 GetCompTopThree 返回的是用户 ID
-		// 以后可以通过查询 topthree_records 表直接获取队伍模式的 bloodRank
+		if p.topThree != nil {
+			topThreeMap, err := p.topThree.GetCompTopThree(ctx, compID)
+			if err == nil {
+				for chalID, entry := range topThreeMap {
+					if entry.FirstBloodTeam != "" {
+						bloodRank[entry.FirstBloodTeam+":"+chalID] = 1
+					} else if entry.FirstBlood != "" {
+						// 兼容旧数据（没有 teamID）
+						bloodRank[entry.FirstBlood+":"+chalID] = 1
+					}
+					if entry.SecondBloodTeam != "" {
+						bloodRank[entry.SecondBloodTeam+":"+chalID] = 2
+					} else if entry.SecondBlood != "" {
+						bloodRank[entry.SecondBlood+":"+chalID] = 2
+					}
+					if entry.ThirdBloodTeam != "" {
+						bloodRank[entry.ThirdBloodTeam+":"+chalID] = 3
+					} else if entry.ThirdBlood != "" {
+						bloodRank[entry.ThirdBlood+":"+chalID] = 3
+					}
+				}
+			}
+		}
 	} else {
 		// 个人模式（默认）
 		solves, err := pluginutil.GetCorrectSubmissions(ctx, p.db, compID)

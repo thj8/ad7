@@ -333,7 +333,7 @@ func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID strin
 	entry.ChallengeID = chalID
 
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT user_id, ranking
+		SELECT user_id, team_id, ranking
 		FROM topthree_records
 		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0 AND ranking <= 3
 		ORDER BY ranking ASC
@@ -345,17 +345,27 @@ func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID strin
 
 	for rows.Next() {
 		var userID string
+		var teamID sql.NullString
 		var ranking int
-		if err := rows.Scan(&userID, &ranking); err != nil {
+		if err := rows.Scan(&userID, &teamID, &ranking); err != nil {
 			continue
 		}
 		switch ranking {
 		case 1:
 			entry.FirstBlood = userID
+			if teamID.Valid {
+				entry.FirstBloodTeam = teamID.String
+			}
 		case 2:
 			entry.SecondBlood = userID
+			if teamID.Valid {
+				entry.SecondBloodTeam = teamID.String
+			}
 		case 3:
 			entry.ThirdBlood = userID
+			if teamID.Valid {
+				entry.ThirdBloodTeam = teamID.String
+			}
 		}
 	}
 
@@ -383,7 +393,7 @@ func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string
 // getCompTopThreeFromDB 从数据库获取比赛每道题目的三血信息
 func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT challenge_id, user_id, ranking
+		SELECT challenge_id, user_id, team_id, ranking
 		FROM topthree_records
 		WHERE competition_id = ? AND is_deleted = 0 AND ranking <= 3
 		ORDER BY ranking ASC
@@ -396,8 +406,9 @@ func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[
 	result := make(map[string]BloodRankEntry)
 	for rows.Next() {
 		var chalID, userID string
+		var teamID sql.NullString
 		var ranking int
-		if err := rows.Scan(&chalID, &userID, &ranking); err != nil {
+		if err := rows.Scan(&chalID, &userID, &teamID, &ranking); err != nil {
 			return nil, err
 		}
 		entry := result[chalID]
@@ -405,10 +416,19 @@ func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[
 		switch ranking {
 		case 1:
 			entry.FirstBlood = userID
+			if teamID.Valid {
+				entry.FirstBloodTeam = teamID.String
+			}
 		case 2:
 			entry.SecondBlood = userID
+			if teamID.Valid {
+				entry.SecondBloodTeam = teamID.String
+			}
 		case 3:
 			entry.ThirdBlood = userID
+			if teamID.Valid {
+				entry.ThirdBloodTeam = teamID.String
+			}
 		}
 		result[chalID] = entry
 	}
