@@ -64,3 +64,59 @@ func TestWriteError(t *testing.T) {
 		t.Errorf("body = %q, want %q", body, want)
 	}
 }
+
+func TestNoOpProvider(t *testing.T) {
+	np := NoOpProvider{}
+
+	// Get should always return (nil, false)
+	if v, ok := np.Get("key"); v != nil || ok {
+		t.Errorf("Get() = %v, %v; want nil, false", v, ok)
+	}
+
+	// Set should be no-op (no error)
+	np.Set("key", "value")
+
+	// Get still returns (nil, false)
+	if v, ok := np.Get("key"); v != nil || ok {
+		t.Errorf("Get() after Set = %v, %v; want nil, false", v, ok)
+	}
+
+	// Delete should be no-op (no error)
+	np.Delete("key")
+
+	// DeleteByPrefix should be no-op (no error)
+	np.DeleteByPrefix("prefix:")
+}
+
+func TestWithCacheNoOp(t *testing.T) {
+	called := 0
+	fn := func() (any, error) {
+		called++
+		return "result", nil
+	}
+
+	np := NoOpProvider{}
+	result, err := WithCache(np, "key", fn)
+
+	if err != nil {
+		t.Errorf("WithCache error = %v", err)
+	}
+	if result != "result" {
+		t.Errorf("result = %v, want %v", result, "result")
+	}
+	if called != 1 {
+		t.Errorf("fn called %d times, want 1", called)
+	}
+
+	// 第二次调用：仍然应该调用 fn（无缓存）
+	result2, err := WithCache(np, "key", fn)
+	if err != nil {
+		t.Errorf("WithCache error = %v", err)
+	}
+	if result2 != "result" {
+		t.Errorf("result = %v, want %v", result2, "result")
+	}
+	if called != 2 {
+		t.Errorf("fn called %d times, want 2", called)
+	}
+}
