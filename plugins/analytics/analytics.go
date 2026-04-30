@@ -15,13 +15,12 @@ import (
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
-	"ad7/plugins/cache"
 )
 
 // Plugin 是分析插件，持有数据库连接和缓存提供器。
 type Plugin struct {
 	db   *sql.DB
-	cache cache.Provider
+	cache pluginutil.CacheProvider
 }
 
 // New 创建分析插件实例。
@@ -40,16 +39,22 @@ func (p *Plugin) Name() string {
 //   - GET /api/v1/competitions/{id}/analytics/challenges（题目统计）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+	p.cache = pluginutil.NoOpProvider{}
 	// 从依赖中获取缓存插件
-	if cachePlugin, ok := deps[plugin.NameCache]; ok {
-		if provider, ok := cachePlugin.(cache.Provider); ok {
-			p.cache = provider
+	if cp, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cp.(cachePlugin); ok {
+			p.cache = provider.GetProvider("analytics")
 		}
 	}
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/overview", p.overview)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/categories", p.byCategory)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/users", p.userStats)
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/analytics/challenges", p.challengeStats)
+}
+
+// cachePlugin 是本地接口，只定义我们需要的方法
+type cachePlugin interface {
+	GetProvider(module string) pluginutil.CacheProvider
 }
 
 // overviewResponse 是比赛总览分析的响应结构。

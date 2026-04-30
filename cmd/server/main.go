@@ -74,12 +74,12 @@ func main() {
 
 	// 初始化所有插件（注意顺序：缓存插件最先加载）
 	plugins := []plugin.Plugin{
-		cache.New(),         // 缓存插件（最先加载，供其他插件使用）
-		leaderboard.New(),  // 排行榜插件
-		notification.New(), // 通知插件
-		analytics.New(),    // 分析插件
-		topthree.New(),     // 一二三血插件
-		hints.New(),        // 题目提示插件
+		cache.New(cfg.Cache), // 缓存插件（最先加载，供其他插件使用）
+		leaderboard.New(),    // 排行榜插件
+		notification.New(),   // 通知插件
+		analytics.New(),      // 分析插件
+		topthree.New(),       // 一二三血插件
+		hints.New(),          // 题目提示插件
 	}
 
 	// 构建插件名称到实例的映射，用于依赖注入
@@ -89,9 +89,9 @@ func main() {
 	}
 
 	// 获取缓存提供器（供 handler 使用）
-	var cacheProvider pluginutil.CacheProvider
-	if cp, ok := pluginMap[plugin.NameCache].(cache.Provider); ok {
-		cacheProvider = cp
+	var cacheProvider pluginutil.CacheProvider = pluginutil.NoOpProvider{}
+	if cp, ok := pluginMap[plugin.NameCache].(*cache.Plugin); ok {
+		cacheProvider = cp.GetProvider("competition")
 	}
 
 	// 初始化 Handler 层

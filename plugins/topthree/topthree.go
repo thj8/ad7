@@ -16,13 +16,12 @@ import (
 	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
 	"ad7/internal/uuid"
-	"ad7/plugins/cache"
 )
 
 // Plugin 是三血追踪插件，持有数据库连接。
 type Plugin struct {
 	db    *sql.DB
-	cache cache.Provider
+	cache pluginutil.CacheProvider
 }
 
 // New 创建三血插件实例。
@@ -40,11 +39,12 @@ func (p *Plugin) Name() string {
 // 同时订阅 EventCorrectSubmission 事件，用于实时更新三血排名。
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+	p.cache = pluginutil.NoOpProvider{}
 
-	// 从依赖中获取 cache 插件的 Provider 接口
-	if cachePlugin, ok := deps[plugin.NameCache]; ok {
-		if provider, ok := cachePlugin.(cache.Provider); ok {
-			p.cache = provider
+	// 从依赖中获取 cache 插件
+	if cp, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cp.(cachePlugin); ok {
+			p.cache = provider.GetProvider("topthree")
 		}
 	}
 
@@ -55,6 +55,11 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 		r.Use(auth.Authenticate)
 		r.Get("/api/v1/topthree/competitions/{id}", p.getTopThree)
 	})
+}
+
+// cachePlugin 是本地接口，只定义我们需要的方法
+type cachePlugin interface {
+	GetProvider(module string) pluginutil.CacheProvider
 }
 
 // getCurrentTopThreeForUpdate 在事务中查询指定比赛中某道题目的当前三血记录。
@@ -267,10 +272,15 @@ func (p *Plugin) handleCorrectSubmission(e event.Event) {
 
 	// 清除相关缓存
 	if p.cache != nil {
-		p.cache.Delete("topthree:" + compID)
-		p.cache.Delete("topthree:" + compID + ":" + chalID)
-		p.cache.Delete("topthree:" + compID + ":map")
+		if cm, ok := p.cache.(cacheManager); ok {
+			cm.DeleteByPrefix("topthree:" + compID)
+		}
 	}
+}
+
+// cacheManager 是本地接口，用于更高级的缓存管理
+type cacheManager interface {
+	DeleteByPrefix(prefix string)
 }
 
 // GetBloodRank 获取用户在某道题目的三血排名

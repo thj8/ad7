@@ -50,6 +50,7 @@ func main() {
 		Auth:       authMW,
 		AuthH:      authH,
 		TeamH:      teamH,
+		VerifyH:    verifyH,
 		AuthLimit:  cfg.RateLimit.Auth.Requests,
 		AuthWindow: cfg.RateLimit.Auth.Window,
 	}
@@ -59,10 +60,9 @@ func main() {
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.MaxBodySize(1 << 20)) // 1MB body 限制
 
-	// 公共路由（register, login, verify — 不需要 JWT）
 	r.Route("/api/v1", func(r chi.Router) {
+		// 公共路由（register, login, verify — 不需要 JWT）
 		auth.RegisterPublicRoutes(r, authDeps)
-		r.Post("/verify", verifyH.Verify)
 
 		// 需要认证的队伍路由
 		r.Group(func(r chi.Router) {

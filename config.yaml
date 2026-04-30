@@ -21,8 +21,15 @@ auth:
   url: http://localhost:8081
 
 cache:
+  enabled: true
   default_ttl: 5m
   cleanup_interval: 10m
+  modules:
+    analytics: true
+    leaderboard: true
+    topthree: true
+    competition: true
+    auth: true
 
 log:
   path: "logs/server.log"

@@ -6,3 +6,4 @@ config.yaml
 sql/migrations/*.local.sql
 .wolf
 clean.sh
+./logs

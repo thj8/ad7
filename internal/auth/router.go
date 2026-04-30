@@ -13,6 +13,7 @@ type RouteDeps struct {
 	Auth       *middleware.Auth
 	AuthH      *AuthHandler
 	TeamH      *TeamHandler
+	VerifyH    *VerifyHandler
 	AuthLimit  int           // 认证端点限流请求数
 	AuthWindow time.Duration // 认证端点限流时间窗口
 }
@@ -27,6 +28,8 @@ func RegisterPublicRoutes(r chi.Router, deps RouteDeps) {
 		r.Post("/register", deps.AuthH.Register)
 		r.Post("/login", deps.AuthH.Login)
 	})
+
+	r.Post("/verify", deps.VerifyH.Verify)
 
 	// No rate limit on team lookup
 	r.Get("/users/{userID}/teams", deps.TeamH.GetUserTeams)

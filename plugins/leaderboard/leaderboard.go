@@ -16,7 +16,6 @@ import (
 	"ad7/internal/middleware"
 	"ad7/internal/plugin"
 	"ad7/internal/pluginutil"
-	"ad7/plugins/cache"
 	"ad7/plugins/topthree"
 )
 
@@ -24,7 +23,7 @@ import (
 type Plugin struct {
 	db        *sql.DB
 	topThree  topthree.TopThreeProvider
-	cache     cache.Provider
+	cache     pluginutil.CacheProvider
 }
 
 // New 创建排行榜插件实例。
@@ -39,6 +38,7 @@ func (p *Plugin) Name() string {
 // 路由：GET /api/v1/competitions/{id}/leaderboard（需要认证）
 func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]plugin.Plugin) {
 	p.db = db
+	p.cache = pluginutil.NoOpProvider{}
 
 	// 从依赖中获取 topthree 插件的 TopThreeProvider 接口
 	if topThreePlugin, ok := deps[plugin.NameTopThree]; ok {
@@ -47,14 +47,19 @@ func (p *Plugin) Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps 
 		}
 	}
 
-	// 从依赖中获取 cache 插件的 Provider 接口
-	if cachePlugin, ok := deps[plugin.NameCache]; ok {
-		if provider, ok := cachePlugin.(cache.Provider); ok {
-			p.cache = provider
+	// 从依赖中获取 cache 插件
+	if cp, ok := deps[plugin.NameCache]; ok {
+		if provider, ok := cp.(cachePlugin); ok {
+			p.cache = provider.GetProvider("leaderboard")
 		}
 	}
 
 	r.With(auth.Authenticate).Get("/api/v1/competitions/{id}/leaderboard", p.listByComp)
+}
+
+// cachePlugin 是本地接口，只定义我们需要的方法
+type cachePlugin interface {
+	GetProvider(module string) pluginutil.CacheProvider
 }
 
 // challengeResult 表示用户/队伍在某道题目上的解题结果。

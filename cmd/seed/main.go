@@ -269,11 +269,13 @@ func registerAndLoginWithRole(username, password, role string) (token string, us
 
 	// 检查用户是否已存在
 	var existingID, existingRole string
-	db.QueryRow("SELECT res_id, role FROM users WHERE username = ?", username).Scan(&existingID, &existingRole)
-	if existingID != "" {
+	err := db.QueryRow("SELECT res_id, role FROM users WHERE username = ?", username).Scan(&existingID, &existingRole)
+	if err == nil && existingID != "" {
+		log.Printf("user exists: %s", username)
 		token = signToken(existingID, existingRole)
 		return token, existingID
 	}
+	log.Printf("creating user: %s", username)
 
 	// 生成 res_id 和密码 hash
 	resID := newUUID()
@@ -373,15 +375,15 @@ func apiAddChallengeToComp(token, compID, chalID string) {
 }
 
 func apiStartComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/start", nil, token)
 }
 
 func apiEndComp(token, compID string) {
-	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", token)
+	postJSONIgnore409(ctfURL()+"/api/v1/admin/competitions/"+compID+"/end", nil, token)
 }
 
 func apiCreateTeam(token, name string) string {
-	m := postJSON(authURL()+"/api/v1/admin/teams", map[string]string{"name": name}, token)
+	m := postJSONTeam(authURL()+"/api/v1/admin/teams", map[string]string{"name": name}, token)
 	id, ok := m["id"].(string)
 	if !ok {
 		log.Fatalf("create team: no id: %v", m)
@@ -389,8 +391,74 @@ func apiCreateTeam(token, name string) string {
 	return id
 }
 
+// postJSONTeam creates a team, tolerating 409 (already exists).
+// Returns the existing team ID on duplicate name error.
+func postJSONTeam(url string, body any, token string) map[string]any {
+	// 先检查队名是否已存在
+	teamName := body.(map[string]string)["name"]
+	db := getDB()
+	defer db.Close()
+
+	var existingID string
+	err := db.QueryRow("SELECT res_id FROM teams WHERE name = ? AND is_deleted = 0", teamName).Scan(&existingID)
+	if err == nil && existingID != "" {
+		log.Printf("team exists: %s, id=%s", teamName, existingID)
+		return map[string]any{"id": existingID}
+	}
+	log.Printf("creating team: %s", teamName)
+
+	for attempt := 0; attempt < 5; attempt++ {
+		var bodyReader io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			bodyReader = bytes.NewReader(b)
+		}
+		req, err := http.NewRequest("POST", url, bodyReader)
+		if err != nil {
+			log.Fatalf("new request %s: %v", url, err)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Fatalf("post %s: %v", url, err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 429 {
+			time.Sleep(time.Duration(2+attempt) * time.Second)
+			continue
+		}
+		if resp.StatusCode == 409 {
+			// 队伍已存在，重新查询获取 ID
+			var existingID2 string
+			err := db.QueryRow("SELECT res_id FROM teams WHERE name = ? AND is_deleted = 0", teamName).Scan(&existingID2)
+			log.Printf("SQL: SELECT res_id FROM teams WHERE name = '%s' AND is_deleted = 0", teamName)
+			if err == nil && existingID2 != "" {
+				log.Printf("team exists (409): %s, id=%s", teamName, existingID2)
+				return map[string]any{"id": existingID2}
+			}
+			log.Fatalf("team %s: 409 but not found in DB", teamName)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			log.Fatalf("post %s: status %d: %s", url, resp.StatusCode, data)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			log.Fatalf("decode %s: %v (%s)", url, err, data)
+		}
+		return m
+	}
+	log.Fatalf("post %s: too many retries (429)", url)
+	return nil
+}
+
 func apiAddTeamMember(token, teamID, userID string) {
-	postJSON(authURL()+"/api/v1/admin/teams/"+teamID+"/members",
+	postJSONIgnore409(authURL()+"/api/v1/admin/teams/"+teamID+"/members",
 		map[string]string{"user_id": userID}, token)
 }
 
@@ -399,12 +467,21 @@ func apiAddTeamToComp(token, compID, teamID string) {
 		map[string]string{"team_id": teamID}, token)
 }
 
-// postJSONIgnore409 发送 POST 请求，容忍 409（已处于目标状态）。遇到 429 自动重试。
-func postJSONIgnore409(url string, token string) {
+// postJSONIgnore409 sends POST request, tolerating 409 (already in target state).
+// Retries automatically on 429. Supports optional body.
+func postJSONIgnore409(url string, body map[string]string, token string) {
 	for attempt := 0; attempt < 5; attempt++ {
-		req, err := http.NewRequest("POST", url, nil)
+		var bodyReader io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			bodyReader = bytes.NewReader(b)
+		}
+		req, err := http.NewRequest("POST", url, bodyReader)
 		if err != nil {
 			log.Fatalf("new request %s: %v", url, err)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
 		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)

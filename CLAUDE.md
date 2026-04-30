@@ -37,12 +37,6 @@ go test ./internal/integration/... -v -run TestSubmitFlag -count=1
 
 # 应用数据库架构
 mysql -h <host> -u root -p<password> ctf < sql/schema.sql
-
-# 运行迁移脚本（从 users.team_id 迁移到 team_members）
-mysql -h <host> -u root -p<password> ctf < sql/migrations/001_team_members.sql
-
-# 运行队伍比赛模式迁移
-mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_mode.sql
 ```
 
 ## 架构
@@ -69,13 +63,14 @@ mysql -h <host> -u root -p<password> ctf < sql/migrations/002_team_competition_m
 
 **插件系统：**
 - `internal/plugin/` — `Plugin` 接口：`Name() string` 和 `Register(r chi.Router, db *sql.DB, auth *middleware.Auth, deps map[string]Plugin)`。插件通过名称标识，支持依赖注入
-- `internal/plugin/names.go` — 插件名称常量：`NameLeaderboard`、`NameNotification`、`NameHints`、`NameAnalytics`、`NameTopThree`
+- `internal/plugin/names.go` — 插件名称常量：`NameLeaderboard`、`NameNotification`、`NameHints`、`NameAnalytics`、`NameTopThree`、`NameCache`
 - `internal/pluginutil/` — 插件共享工具：`WriteJSON`/`WriteError` 响应、`ParseID` 验证、`DBTX` 接口、共享查询函数（`GetCompChallenges`、`GetCorrectSubmissions`、`GetUserScores`、`GetTeamCorrectSubmissions`、`GetTeamScores` 等）
-- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，实现 `TopThreeProvider` 接口暴露给其他插件，支持个人模式和队伍模式
-- `plugins/leaderboard/` — 每个比赛的排行榜，通过 `TopThreeProvider` 接口获取三血数据，不直接查询 topthree_records 表，支持个人模式和队伍模式切换
+- `plugins/cache/` — 通用缓存插件，**事件驱动**：订阅 `EventCorrectSubmission` 清除相关缓存，实现 `Provider` 接口暴露给其他插件，为 auth 中间件提供 token 缓存，支持懒淘汰和后台清理
+- `plugins/topthree/` — 一血追踪，**事件驱动**：订阅 `EventCorrectSubmission`，实现 `TopThreeProvider` 接口暴露给其他插件，支持个人模式和队伍模式，缓存填满后不再失效
+- `plugins/leaderboard/` — 每个比赛的排行榜，通过 `TopThreeProvider` 接口获取三血数据，不直接查询 topthree_records 表，支持个人模式和队伍模式切换，支持缓存
 - `plugins/notification/` — 每个比赛的通知（管理员创建，所有用户查看）
 - `plugins/hints/` — 题目提示（管理员管理，用户查看可见提示）
-- `plugins/analytics/` — 比赛分析，所有查询通过 `pluginutil` 共享函数，无直接 SQL，支持个人模式和队伍模式的统计数据
+- `plugins/analytics/` — 比赛分析，所有查询通过 `pluginutil` 共享函数，无直接 SQL，支持个人模式和队伍模式的统计数据，支持缓存
 
 **比赛模式：**
 - 支持两种比赛模式：`individual`（个人模式，默认）和 `team`（队伍模式）
