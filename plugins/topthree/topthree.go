@@ -331,35 +331,6 @@ func (p *Plugin) refreshChalCache(ctx context.Context, compID, chalID string) {
 	}
 }
 
-// getChalTopThreeFromDB 从数据库获取单道题目的三血信息
-func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID string) BloodRankEntry {
-	var entry BloodRankEntry
-	entry.ChallengeID = chalID
-
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT user_id, team_id, ranking
-		FROM topthree_records
-		WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0 AND ranking <= 3
-		ORDER BY ranking ASC
-	`, compID, chalID)
-	if err != nil {
-		return entry
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var userID string
-		var teamID sql.NullString
-		var ranking int
-		if err := rows.Scan(&userID, &teamID, &ranking); err != nil {
-			continue
-		}
-		updateBloodRankEntry(&entry, userID, teamID, ranking)
-	}
-
-	return entry
-}
-
 // cacheManager 是本地接口，用于更高级的缓存管理
 type cacheManager interface {
 	DeleteByPrefix(prefix string)
@@ -369,7 +340,7 @@ type cacheManager interface {
 // 返回值: map[challengeID]BloodRankEntry
 func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
 	cached, err := pluginutil.WithCache(p.cache, "topthree:"+compID+":map", func() (any, error) {
-		return p.getCompTopThreeFromDB(ctx, compID)
+		return p.getBloodRankEntriesFromDB(ctx, compID)
 	})
 	if err != nil {
 		return nil, err
@@ -377,14 +348,32 @@ func (p *Plugin) GetCompTopThree(ctx context.Context, compID string) (map[string
 	return cached.(map[string]BloodRankEntry), nil
 }
 
-// getCompTopThreeFromDB 从数据库获取比赛每道题目的三血信息
-func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[string]BloodRankEntry, error) {
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT challenge_id, user_id, team_id, ranking
-		FROM topthree_records
-		WHERE competition_id = ? AND is_deleted = 0 AND ranking <= 3
-		ORDER BY ranking ASC
-	`, compID)
+// getBloodRankEntriesFromDB 从数据库获取三血信息
+// 如果提供 chalID 则只获取该题目的数据（返回 map 只有一个键）
+// 如果不提供 chalID 则获取所有题目的数据
+func (p *Plugin) getBloodRankEntriesFromDB(ctx context.Context, compID string, chalIDs ...string) (map[string]BloodRankEntry, error) {
+	var rows *sql.Rows
+	var err error
+
+	if len(chalIDs) > 0 && chalIDs[0] != "" {
+		// 查询单道题目
+		chalID := chalIDs[0]
+		rows, err = p.db.QueryContext(ctx, `
+			SELECT challenge_id, user_id, team_id, ranking
+			FROM topthree_records
+			WHERE competition_id = ? AND challenge_id = ? AND is_deleted = 0 AND ranking <= 3
+			ORDER BY ranking ASC
+		`, compID, chalID)
+	} else {
+		// 查询所有题目
+		rows, err = p.db.QueryContext(ctx, `
+			SELECT challenge_id, user_id, team_id, ranking
+			FROM topthree_records
+			WHERE competition_id = ? AND is_deleted = 0 AND ranking <= 3
+			ORDER BY ranking ASC
+		`, compID)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +394,24 @@ func (p *Plugin) getCompTopThreeFromDB(ctx context.Context, compID string) (map[
 	}
 
 	return result, rows.Err()
+}
+
+// getChalTopThreeFromDB 从数据库获取单道题目的三血信息
+func (p *Plugin) getChalTopThreeFromDB(ctx context.Context, compID, chalID string) BloodRankEntry {
+	result, err := p.getBloodRankEntriesFromDB(ctx, compID, chalID)
+	if err != nil {
+		var emptyEntry BloodRankEntry
+		emptyEntry.ChallengeID = chalID
+		return emptyEntry
+	}
+
+	if entry, ok := result[chalID]; ok {
+		return entry
+	}
+
+	var emptyEntry BloodRankEntry
+	emptyEntry.ChallengeID = chalID
+	return emptyEntry
 }
 
 // updateBloodRankEntry 根据排名更新 BloodRankEntry
