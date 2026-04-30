@@ -72,8 +72,10 @@ type AuthConfig struct {
 
 // CacheConfig 定义缓存参数。
 type CacheConfig struct {
-	DefaultTTL       time.Duration `yaml:"default_ttl"`        // 默认缓存生存时间
-	CleanupInterval  time.Duration `yaml:"cleanup_interval"`   // 后台清理间隔，0 表示不启动后台清理
+	Enabled          bool            `yaml:"enabled"`          // 缓存是否启用
+	Modules          map[string]bool `yaml:"modules"`          // 各模块缓存开关
+	DefaultTTL       time.Duration   `yaml:"default_ttl"`      // 默认缓存生存时间
+	CleanupInterval  time.Duration   `yaml:"cleanup_interval"` // 后台清理间隔，0 表示不启动后台清理
 }
 
 // Load 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
@@ -94,6 +96,43 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	setDefaults(&cfg)
+
+	// 验证必填字段
+	if cfg.JWT.Secret == "" {
+		return nil, fmt.Errorf("jwt.secret is required")
+	}
+	if len(cfg.JWT.Secret) < 32 {
+		return nil, fmt.Errorf("jwt.secret must be at least 32 characters")
+	}
+	defaultSecrets := map[string]bool{
+		"change-me-in-production": true,
+		"secret":                  true,
+		"jwt-secret":              true,
+		"your-secret-key":         true,
+	}
+	if defaultSecrets[cfg.JWT.Secret] {
+		return nil, fmt.Errorf("jwt.secret must not be a known default value")
+	}
+	if cfg.DB.Host == "" {
+		return nil, fmt.Errorf("db.host is required")
+	}
+
+	return &cfg, nil
+}
+
+// LoadFromBytes 从字节数组加载配置（用于测试）
+func LoadFromBytes(data []byte) (*Config, error) {
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	setDefaults(&cfg)
+	return &cfg, nil
+}
+
+// setDefaults 设置配置默认值
+func setDefaults(cfg *Config) {
 	// 设置默认端口
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
@@ -118,6 +157,9 @@ func Load(path string) (*Config, error) {
 		cfg.Auth.URL = "http://localhost:8081"
 	}
 	// 设置默认缓存参数
+	if !cfg.Cache.Enabled {
+		cfg.Cache.Enabled = true
+	}
 	if cfg.Cache.DefaultTTL == 0 {
 		cfg.Cache.DefaultTTL = 5 * time.Minute
 	}
@@ -126,22 +168,6 @@ func Load(path string) (*Config, error) {
 	}
 	// 验证必填字段
 	if cfg.JWT.Secret == "" {
-		return nil, fmt.Errorf("jwt.secret is required")
+		// 这里只是设置默认值，实际验证在 Load 中
 	}
-	if len(cfg.JWT.Secret) < 32 {
-		return nil, fmt.Errorf("jwt.secret must be at least 32 characters")
-	}
-	defaultSecrets := map[string]bool{
-		"change-me-in-production": true,
-		"secret":                  true,
-		"jwt-secret":              true,
-		"your-secret-key":         true,
-	}
-	if defaultSecrets[cfg.JWT.Secret] {
-		return nil, fmt.Errorf("jwt.secret must not be a known default value")
-	}
-	if cfg.DB.Host == "" {
-		return nil, fmt.Errorf("db.host is required")
-	}
-	return &cfg, nil
 }
