@@ -18,10 +18,14 @@
 - **每个比赛的通知** — 管理员可以发布限定在比赛范围内的公告
 - **比赛分析** — 详细统计数据，包括概览、分类、用户/队伍和题目分析
 - **题目提示系统** — 管理员管理提示，用户按需查看可见提示
-- **插件系统** — 可扩展的编译时插件接口，用于添加新功能
+- **事件驱动缓存** — 通用内存缓存插件，基于事件自动失效，支持懒淘汰和后台清理
+- **插件系统** — 可扩展的编译时插件接口，用于添加新功能，插件间通过接口通信
+- **事件系统** — 进程内 pub/sub，正确提交时触发缓存失效等响应
 - **UUID ID** — 所有公开 ID 使用 UUID v4（32字符十六进制字符串无连字符）作为唯一标识符
 - **独立认证服务** — 认证服务器独立部署，支持用户注册/登录、队伍管理、队长权限
-- **通用内存缓存** — 泛型 TTL 缓存层，支持懒淘汰和后台清理，`GetOrSet` 简化缓存集成
+- **速率限制** — 提交端点按用户 ID 限流（未认证时回退到 IP 限流）
+- **结构化日志** — 双输出日志（stdout + 可选文件），支持级别配置
+- **软删除** — 所有实体使用 `is_deleted` 字段实现软删除
 
 ## 快速开始
 
@@ -61,16 +65,31 @@ go run ./cmd/server -config config.yaml
 
 ## 架构说明
 
+### 分层架构
+
+```
+请求 → Router → Handler → Service → Store → MySQL
+                   ↓
+              Event System → Plugins
+```
+
+- **Router** — 路由注册，按领域拆分（challenges、competitions、submissions）
+- **Handler** — HTTP 请求处理，使用单独的请求结构体
+- **Service** — 业务逻辑，正确提交时发布事件
+- **Store** — 数据访问层接口 + MySQL 实现
+- **Plugin** — 编译时插件，通过接口通信，不允许直接查主表
+
 ### 双服务架构
 
 项目使用独立的认证服务器和 CTF 服务器：
 
 ```
 认证服务器 (端口 8081)
-├── /api/v1/register    # 用户注册
-├── /api/v1/login       # 用户登录
-├── /api/v1/verify      # Token 验证（供 CTF 服务器调用）
-└── /api/v1/teams/*     # 队伍管理
+├── /api/v1/register         # 用户注册
+├── /api/v1/login            # 用户登录
+├── /api/v1/verify           # Token 验证（供 CTF 服务器调用）
+├── /api/v1/teams/*          # 队伍 CRUD + 成员管理
+└── /api/v1/admin/teams/*    # 管理员队伍操作（队长转移等）
 
 CTF 服务器 (端口 8080)
 ├── 所有 CTF 业务 API
@@ -78,6 +97,20 @@ CTF 服务器 (端口 8080)
 ```
 
 认证服务器和 CTF 服务器共享同一个 MySQL 数据库。
+
+### 包依赖规则
+
+| 包 | 范围 | 说明 |
+|---|------|------|
+| `internal/basemodel/` | 共享 | BaseModel、Time、ValidationError、验证工具 |
+| `internal/db/` | 共享 | 数据库连接管理 |
+| `internal/config/` | 共享 | 配置类型 + CTF 专用 Load 函数 |
+| `internal/middleware/` | 共享 | 认证、限流、安全中间件 |
+| `internal/cache/` | 共享 | 泛型内存 TTL 缓存 |
+| `internal/auth/` | Auth 专属 | 用户、队伍、JWT 逻辑 |
+| `internal/model/` | CTF 专属 | 领域模型（Challenge、Submission 等） |
+| `internal/store/` | CTF 专属 | Store 接口和 MySQL 实现 |
+| `internal/ctxutil/` | CTF 专属 | URL 参数验证、Context 存取 |
 
 ## API 概览
 
@@ -88,7 +121,7 @@ CTF 服务器 (端口 8080)
 ### 题目（管理员）
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | POST | `/api/v1/challenges` | 创建题目 |
 | PUT | `/api/v1/challenges/{id}` | 更新题目 |
 | DELETE | `/api/v1/challenges/{id}` | 删除题目 |
@@ -96,21 +129,21 @@ CTF 服务器 (端口 8080)
 ### 题目（用户）
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | GET | `/api/v1/challenges` | 列出已启用的题目 |
 | GET | `/api/v1/challenges/{id}` | 获取题目详情 |
 
 ### 提交
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | POST | `/api/v1/submissions` | 提交 Flag（全局） |
 | POST | `/api/v1/competitions/{id}/submit` | 提交 Flag（比赛内，速率限制） |
 
 ### 比赛（管理员）
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | POST | `/api/v1/competitions` | 创建比赛（支持 mode 和 team_join_mode） |
 | PUT | `/api/v1/competitions/{id}` | 更新比赛 |
 | DELETE | `/api/v1/competitions/{id}` | 删除比赛 |
@@ -124,7 +157,7 @@ CTF 服务器 (端口 8080)
 ### 比赛（用户）
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | GET | `/api/v1/competitions` | 列出活跃比赛 |
 | GET | `/api/v1/competitions/{id}` | 获取比赛详情 |
 | GET | `/api/v1/competitions/{id}/challenges` | 列出比赛题目（含访问控制） |
@@ -132,7 +165,7 @@ CTF 服务器 (端口 8080)
 ### 插件
 
 | 方法 | 路径 | 描述 |
-|--------|------|-------------|
+|--------|------|------|
 | GET | `/api/v1/competitions/{id}/leaderboard` | 比赛排行榜（自动切换个人/队伍模式） |
 | GET | `/api/v1/topthree/competitions/{id}` | 比赛每道题的前三名（支持个人/队伍模式） |
 | POST | `/api/v1/admin/competitions/{id}/notifications` | 创建比赛通知 |
@@ -175,9 +208,11 @@ CTF 服务器 (端口 8080)
 
 ## 技术栈
 
-- **Go 1.22** 使用 [chi](https://github.com/go-chi/chi/v5) 路由器
+- **Go 1.25** 使用 [chi](https://github.com/go-chi/chi/v5) 路由器
 - **MySQL** 通过 `database/sql`
 - **JWT**（HS256）通过 `golang-jwt/jwt/v5`
+- **速率限制** 通过 [httprate](https://github.com/go-chi/httprate)
+- **密码加密** 通过 `golang.org/x/crypto`（bcrypt）
 - **UUID v4** — 自定义实现，生成 32 字符十六进制 UUID 无连字符
 
 ## 项目结构
@@ -190,25 +225,31 @@ CTF 服务器 (端口 8080)
 │   └── seed/             # 测试数据生成器
 ├── internal/
 │   ├── auth/             # 认证模块（用户、队伍、JWT）
+│   ├── basemodel/        # 共享基础类型（BaseModel、ValidationError）
 │   ├── cache/            # 泛型内存缓存（TTL、GetOrSet）
 │   ├── config/           # YAML 配置加载
+│   ├── ctxutil/          # CTF 专用 Context 工具
+│   ├── db/               # 共享数据库连接管理
+│   ├── event/            # 事件系统（pub/sub）
 │   ├── handler/          # HTTP 处理器
-│   ├── middleware/       # 认证、速率限制
-│   ├── model/            # 领域结构体
+│   ├── integration/      # 集成测试
+│   ├── logger/           # 结构化日志
+│   ├── middleware/       # 认证、速率限制、安全
+│   ├── model/            # CTF 领域模型
 │   ├── plugin/           # 插件接口
 │   ├── pluginutil/       # 插件共享工具和查询
-│   ├── event/            # 事件系统（pub/sub）
+│   ├── router/           # 路由注册
 │   ├── service/          # 业务逻辑（含 team_resolver）
-│   ├── uuid/             # UUID 生成器
-│   ├── logger/           # 结构化日志
 │   ├── store/            # DB 接口 + MySQL 实现
-│   └── integration/      # 集成测试
+│   ├── testutil/         # 集成测试基础设施
+│   └── uuid/             # UUID 生成器
 ├── plugins/
-│   ├── leaderboard/      # 每个比赛的排行榜（双模式）
-│   ├── topthree/         # 一血/二血/三血追踪（双模式）
-│   ├── notification/     # 每个比赛的通知
 │   ├── analytics/        # 比赛分析（双模式）
-│   └── hints/            # 题目提示系统
+│   ├── cache/            # 事件驱动缓存插件
+│   ├── hints/            # 题目提示系统
+│   ├── leaderboard/      # 每个比赛的排行榜（双模式）
+│   ├── notification/     # 每个比赛的通知
+│   └── topthree/         # 一血/二血/三血追踪（双模式）
 ├── sql/
 │   ├── schema.sql        # 数据库架构
 │   └── migrations/       # 迁移脚本
@@ -217,6 +258,8 @@ CTF 服务器 (端口 8080)
 ```
 
 ## 配置
+
+### CTF 服务器（config.yaml）
 
 ```yaml
 server:
@@ -230,12 +273,51 @@ db:
   dbname: ctf
 
 jwt:
-  secret: "your-secret-key"
+  secret: "change-me-in-production"
   admin_role: "admin"
 
+auth:
+  url: "http://localhost:8081"  # 认证服务地址
+
+rate_limit:
+  submission:
+    requests: 3      # 提交限流：窗口内最大请求数
+    window: 10s      # 提交限流：时间窗口
+
+log:
+  # path: "logs/server.log"    # 日志文件路径，注释掉则仅输出到 stdout
+  level: "info"                # debug / info / warn / error
+
 cache:
-  default_ttl: 5m
-  cleanup_interval: 10m
+  default_ttl: 5m              # 默认缓存过期时间
+  cleanup_interval: 10m        # 后台清理间隔，0 表示不启动后台清理
+```
+
+### 认证服务器（cmd/auth-server/config.yaml）
+
+```yaml
+server:
+  port: 8081
+
+db:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: ""
+  dbname: ctf
+
+jwt:
+  secret: "change-me-in-production"
+  admin_role: "admin"
+
+rate_limit:
+  auth:
+    requests: 10     # 认证限流：窗口内最大请求数
+    window: 1m       # 认证限流：时间窗口
+
+log:
+  # path: "logs/auth-server.log"    # 日志文件路径，注释掉则仅输出到 stdout
+  level: "info"                      # debug / info / warn / error
 ```
 
 ## 许可证
