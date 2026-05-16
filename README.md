@@ -289,8 +289,15 @@ log:
   level: "info"                # debug / info / warn / error
 
 cache:
+  enabled: true                 # 缓存全局开关
   default_ttl: 5m              # 默认缓存过期时间
   cleanup_interval: 10m        # 后台清理间隔，0 表示不启动后台清理
+  # modules:                    # 按模块启用/禁用缓存
+  #   analytics: true
+  #   leaderboard: true
+  #   topthree: true
+  #   competition: true
+  #   auth: true
 ```
 
 ### 认证服务器（cmd/auth-server/config.yaml）
